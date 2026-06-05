@@ -7,7 +7,7 @@ The project collects daily signals from trusted vulnerability and security resea
 - Resource Monitor
 - Structured CVE Radar
 - Research Watch
-- Defender Actions
+- Defender Action Queue
 - Pipeline Health
 
 ## Data Sources
@@ -65,7 +65,7 @@ Open:
 http://localhost:8765
 ```
 
-The landing page is a read-only resource monitor for the host running the pipeline. Threat intelligence views are available in the navigation.
+The landing page is a read-only resource monitor for the host running the pipeline. It includes threshold-based health status and the last telemetry update time. Threat intelligence views are available in the navigation.
 
 ## Configuration
 
@@ -102,5 +102,6 @@ bash scripts/discoveries_pipeline.sh
 - The dashboard API is read-only.
 - The merge step accepts only the three allowed intelligence kinds.
 - Structured CVE and research metadata is allowed only through fixed `items` and `sources` fields.
+- Defender actions are generated as a constrained queue with priority, category, owner, due window, and related CVEs or sources.
 - RSS research entries are filtered by security keywords to avoid conference, interview, or general technology content.
 - Existing entries with the same date and title are updated instead of duplicated.

@@ -482,6 +482,12 @@
                     <div class="stat-value" id="section-value">--</div>
                     <div class="stat-sub" id="section-sub">Validated intelligence sections</div>
                 </div>
+                <div class="card">
+                    <span class="stat-label">Resource Health</span>
+                    <div class="stat-value" id="resource-health-value">--</div>
+                    <div class="stat-sub" id="resource-health-sub">Waiting for telemetry</div>
+                    <div class="stat-sub" id="telemetry-time">Last update unavailable</div>
+                </div>
             </div>
         </section>
 
@@ -499,7 +505,13 @@
             <div id="cve-view"></div>
         </section>
         <section id="page-research" class="page"><div id="research-view"></div></section>
-        <section id="page-actions" class="page"><div id="actions-view"></div></section>
+        <section id="page-actions" class="page">
+            <div id="actions-summary-grid" class="grid"></div>
+            <div class="section-title"><i data-lucide="list-checks"></i><span>Action Queue</span></div>
+            <div id="actions-table-view"></div>
+            <div class="section-title"><i data-lucide="file-text"></i><span>Checklist Notes</span></div>
+            <div id="actions-view"></div>
+        </section>
 
         <section id="page-pipeline" class="page">
             <div class="grid" id="pipeline-stats"></div>
@@ -655,6 +667,68 @@
         `;
     }
 
+    function renderActionQueue(entry) {
+        const items = entryItems(entry);
+        if (!items.length) {
+            return '<div class="empty">No structured action items are available yet.</div>';
+        }
+        const priorityRank = { Critical: 0, High: 1, Watch: 2 };
+        const rows = items.slice().sort((a, b) => (priorityRank[a.priority] ?? 9) - (priorityRank[b.priority] ?? 9)).map(item => {
+            const related = Array.isArray(item.related) && item.related.length
+                ? `<div class="muted mono">${escapeHtml(item.related.join(', '))}</div>`
+                : '<div class="muted">No direct indicator linked</div>';
+            return `
+                <tr>
+                    <td>${badge(item.priority)}</td>
+                    <td>${escapeHtml(item.category || 'General')}</td>
+                    <td>
+                        <strong>${escapeHtml(item.task || 'Untitled action')}</strong>
+                        <div class="muted">${escapeHtml(item.reason || '')}</div>
+                    </td>
+                    <td>${escapeHtml(item.owner || 'Unassigned')}</td>
+                    <td>${escapeHtml(item.due || 'Next review')}</td>
+                    <td>${related}</td>
+                </tr>
+            `;
+        }).join('');
+        return `
+            <div class="table-wrap">
+                <table class="cve-table">
+                    <thead>
+                        <tr><th>Priority</th><th>Category</th><th>Task</th><th>Owner</th><th>Due</th><th>Related</th></tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+        `;
+    }
+
+    function renderResourceHealth(data) {
+        const warnings = [];
+        const critical = [];
+        const cpu = Number(data.cpu && data.cpu.usage);
+        const memory = Number(data.memory && data.memory.percent);
+        const disk = Number(data.disk && data.disk.percent);
+        const temp = data.temperature && data.temperature.cpu === null ? null : Number(data.temperature && data.temperature.cpu);
+        const pipelineStatus = state.pipeline && state.pipeline.status;
+
+        if (cpu >= 90) critical.push('CPU load is very high');
+        else if (cpu >= 75) warnings.push('CPU load is elevated');
+        if (memory >= 90) critical.push('Memory usage is very high');
+        else if (memory >= 80) warnings.push('Memory usage is elevated');
+        if (disk >= 90) critical.push('Disk usage is very high');
+        else if (disk >= 80) warnings.push('Disk usage is elevated');
+        if (temp !== null && temp >= 85) critical.push('CPU temperature is very high');
+        else if (temp !== null && temp >= 75) warnings.push('CPU temperature is elevated');
+        if (pipelineStatus && pipelineStatus !== 'ok') warnings.push('Pipeline is not healthy');
+
+        const status = critical.length ? 'Critical' : warnings.length ? 'Warning' : 'OK';
+        const detail = critical.concat(warnings);
+        setText('resource-health-value', status);
+        setText('resource-health-sub', detail.length ? detail.join(' · ') : 'No resource thresholds are currently breached');
+        setText('telemetry-time', `Last update ${formatDateTime(new Date().toISOString())}`);
+    }
+
     function renderPipeline(latestDate) {
         const pipeline = state.pipeline || {};
         const merge = pipeline.merge || {};
@@ -689,6 +763,7 @@
         const all = [cve, research, actions].filter(Boolean);
         const latestDate = all.map(e => e.date).sort().reverse()[0] || 'No data';
         const cveItems = entryItems(cve);
+        const actionItems = entryItems(actions);
         const criticalCount = cveItems.filter(item => item.priority === 'Critical').length;
         const highCount = cveItems.filter(item => item.priority === 'High').length;
         const cveCount = cveItems.length || countCves(cve && cve.content);
@@ -712,6 +787,13 @@
         document.getElementById('cve-table-view').innerHTML = renderCveTable(cve);
         document.getElementById('cve-view').innerHTML = article(cve, 'CVE Radar');
         document.getElementById('research-view').innerHTML = article(research, 'Research Watch');
+        document.getElementById('actions-summary-grid').innerHTML = [
+            statCard('Open actions', actionItems.length),
+            statCard('Critical', actionItems.filter(item => item.priority === 'Critical').length),
+            statCard('High', actionItems.filter(item => item.priority === 'High').length),
+            statCard('Watch', actionItems.filter(item => item.priority === 'Watch').length),
+        ].join('');
+        document.getElementById('actions-table-view').innerHTML = renderActionQueue(actions);
         document.getElementById('actions-view').innerHTML = article(actions, 'Defender Actions');
         renderPipeline(latestDate);
         try { lucide.createIcons(); } catch (e) {}
@@ -793,8 +875,11 @@
                 </tr>
             `).join('');
             document.getElementById('process-body').innerHTML = rows || '<tr><td colspan="4">No process telemetry available</td></tr>';
+            renderResourceHealth(data);
         } catch (error) {
             setText('status-text', 'System API failed');
+            setText('resource-health-value', 'Unknown');
+            setText('resource-health-sub', 'System API failed');
         }
     }
 

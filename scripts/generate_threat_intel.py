@@ -292,6 +292,69 @@ def build_cve_items(kev, nvd):
     return items[:14]
 
 
+def build_action_items(cve_items, research):
+    actions = []
+    critical = [item for item in cve_items if item.get('priority') == 'Critical']
+    high = [item for item in cve_items if item.get('priority') == 'High']
+
+    if critical:
+        actions.append({
+            'priority': 'Critical',
+            'category': 'Exposure Review',
+            'task': 'Review assets for CISA KEV matches',
+            'reason': f'{len(critical)} known-exploited vulnerabilities were collected today.',
+            'owner': 'Security / Infrastructure',
+            'due': 'Today',
+            'related': [item.get('cve') for item in critical[:6]],
+        })
+
+    if high:
+        actions.append({
+            'priority': 'High',
+            'category': 'Patch Queue',
+            'task': 'Prioritize high-risk non-KEV CVEs',
+            'reason': f'{len(high)} vulnerabilities have high CVSS or EPSS signals.',
+            'owner': 'Infrastructure',
+            'due': 'This week',
+            'related': [item.get('cve') for item in high[:6]],
+        })
+
+    if cve_items:
+        actions.append({
+            'priority': 'High' if critical else 'Watch',
+            'category': 'Detection',
+            'task': 'Add hunts for products listed in CVE Radar',
+            'reason': 'Exploit attempts often appear as abnormal sign-ins, web requests, process creation, or outbound connections before patching is complete.',
+            'owner': 'Detection Engineering',
+            'due': 'Next review',
+            'related': [item.get('cve') for item in cve_items[:6]],
+        })
+
+    if research:
+        actions.append({
+            'priority': 'Watch',
+            'category': 'Threat Research',
+            'task': 'Extract detection opportunities from recent research posts',
+            'reason': f'{len(research[:8])} professional research posts matched the security filter.',
+            'owner': 'Security Analyst',
+            'due': 'Next review',
+            'related': sorted({item.get('source') for item in research[:8] if item.get('source')})[:6],
+        })
+
+    if not actions:
+        actions.append({
+            'priority': 'Watch',
+            'category': 'Monitoring',
+            'task': 'Continue routine monitoring',
+            'reason': 'No high-priority CVE or research signals were collected today.',
+            'owner': 'Security Analyst',
+            'due': 'Next run',
+            'related': [],
+        })
+
+    return actions
+
+
 def build_entries():
     date = str(today())
     kev = get_recent_kev()
@@ -299,6 +362,7 @@ def build_entries():
     research = get_research_watch()
 
     cve_items = build_cve_items(kev, nvd)
+    action_items = build_action_items(cve_items, research)
     cve_rows = []
     for item in cve_items:
         cve_rows.append([
@@ -353,15 +417,10 @@ def build_entries():
     ])
 
     action_lines = ['## Daily Defender Checklist']
-    if cve_rows:
-        action_lines.extend([
-            '1. Check the asset inventory for products listed in the CVE Radar table.',
-            '2. Track CISA KEV matches separately; do not rely on CVSS alone for prioritization.',
-            '3. Extract actionable detections from recent research posts: process names, command lines, domains, file paths, and authentication events.',
-            '4. For products with exploitation signals but no practical patch path, reduce exposure first with ACLs, WAF rules, or temporary feature disablement.',
-        ])
-    else:
-        action_lines.append('1. No high-priority CVE signals were collected today. Continue monitoring.')
+    for index, item in enumerate(action_items, 1):
+        related = ', '.join(item.get('related') or [])
+        suffix = f" Related: {related}." if related else ''
+        action_lines.append(f"{index}. **{item['task']}** [{item['priority']} / {item['category']}]. {item['reason']}{suffix}")
     action_lines.extend([
         '',
         '## Output Boundary',
@@ -390,6 +449,7 @@ def build_entries():
             'date': date,
             'title': f'Defender Action Checklist - {date}',
             'content': '\n'.join(action_lines),
+            'items': action_items,
         },
     ]
 
