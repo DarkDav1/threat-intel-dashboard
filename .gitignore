@@ -1,0 +1,9 @@
+dashboard/discoveries.json
+dashboard/discoveries.json.bak
+dashboard/discoveries-generated.json
+dashboard/discoveries-inbox.json
+dashboard/server.log
+runs/
+__pycache__/
+*.pyc
+.DS_Store

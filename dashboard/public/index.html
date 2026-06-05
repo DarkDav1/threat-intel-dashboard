@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Threat Intelligence Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
+    <style>
+        :root {
+            --bg: #090a0f;
+            --panel: rgba(20, 24, 33, 0.82);
+            --panel-strong: rgba(28, 34, 46, 0.92);
+            --border: rgba(148, 163, 184, 0.18);
+            --text: #eef2f7;
+            --muted: #9aa7b7;
+            --blue: #38bdf8;
+            --green: #34d399;
+            --red: #fb7185;
+            --yellow: #facc15;
+            --radius: 10px;
+        }
+
+        * { box-sizing: border-box; }
+
+        html, body {
+            margin: 0;
+            min-height: 100%;
+            background:
+                radial-gradient(circle at 20% 0%, rgba(56, 189, 248, 0.12), transparent 28%),
+                radial-gradient(circle at 95% 20%, rgba(52, 211, 153, 0.08), transparent 26%),
+                var(--bg);
+            color: var(--text);
+            font-family: Inter, system-ui, sans-serif;
+        }
+
+        .layout {
+            display: grid;
+            grid-template-columns: 252px minmax(0, 1fr);
+            min-height: 100vh;
+        }
+
+        .sidebar {
+            border-right: 1px solid var(--border);
+            background: rgba(10, 14, 22, 0.88);
+            padding: 24px 18px;
+            position: sticky;
+            top: 0;
+            height: 100vh;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 30px;
+        }
+
+        .brand-mark {
+            display: grid;
+            place-items: center;
+            width: 42px;
+            height: 42px;
+            border-radius: 10px;
+            background: rgba(56, 189, 248, 0.12);
+            border: 1px solid rgba(56, 189, 248, 0.24);
+            color: var(--blue);
+        }
+
+        .brand h1 {
+            margin: 0;
+            font-size: 17px;
+            line-height: 1.1;
+        }
+
+        .brand p {
+            margin: 4px 0 0;
+            color: var(--muted);
+            font-size: 12px;
+        }
+
+        .nav {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .nav button {
+            all: unset;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 11px 12px;
+            border-radius: 9px;
+            color: var(--muted);
+            cursor: pointer;
+            font-weight: 700;
+            font-size: 14px;
+        }
+
+        .nav button:hover,
+        .nav button.active {
+            color: var(--text);
+            background: rgba(255, 255, 255, 0.06);
+        }
+
+        .nav button.active {
+            border: 1px solid rgba(56, 189, 248, 0.28);
+            color: var(--blue);
+        }
+
+        .main {
+            padding: 30px 38px 44px;
+            min-width: 0;
+        }
+
+        .topbar {
+            display: flex;
+            justify-content: space-between;
+            gap: 18px;
+            align-items: flex-start;
+            margin-bottom: 26px;
+        }
+
+        .title h2 {
+            margin: 0;
+            font-size: 30px;
+            letter-spacing: 0;
+        }
+
+        .title p {
+            margin: 8px 0 0;
+            color: var(--muted);
+            line-height: 1.55;
+            max-width: 760px;
+        }
+
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 9px 12px;
+            border: 1px solid rgba(52, 211, 153, 0.28);
+            border-radius: 999px;
+            background: rgba(52, 211, 153, 0.08);
+            color: var(--green);
+            font-size: 13px;
+            font-weight: 800;
+            white-space: nowrap;
+        }
+
+        .page { display: none; }
+        .page.active { display: block; }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+            gap: 14px;
+        }
+
+        .card,
+        .article,
+        .step {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 18px;
+        }
+
+        .stat-label {
+            color: var(--muted);
+            font-size: 12px;
+            text-transform: uppercase;
+            font-weight: 800;
+        }
+
+        .stat-value {
+            display: block;
+            margin-top: 8px;
+            font-size: 28px;
+            font-weight: 800;
+            overflow-wrap: anywhere;
+        }
+
+        .section-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 28px 0 14px;
+            font-size: 19px;
+            font-weight: 800;
+        }
+
+        .article {
+            margin-bottom: 16px;
+            min-width: 0;
+        }
+
+        .article-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            color: var(--muted);
+            font-family: "JetBrains Mono", monospace;
+            font-size: 12px;
+            margin-bottom: 12px;
+        }
+
+        .tag {
+            display: inline-flex;
+            border-radius: 999px;
+            padding: 3px 8px;
+            border: 1px solid rgba(56, 189, 248, 0.26);
+            color: var(--blue);
+            background: rgba(56, 189, 248, 0.08);
+        }
+
+        .article h3 {
+            margin: 0 0 14px;
+            font-size: 21px;
+        }
+
+        .markdown {
+            color: var(--muted);
+            line-height: 1.75;
+            overflow-wrap: anywhere;
+        }
+
+        .markdown h1,
+        .markdown h2,
+        .markdown h3 {
+            color: var(--text);
+            margin: 1.35em 0 0.55em;
+        }
+
+        .markdown a { color: var(--blue); text-decoration: none; }
+        .markdown a:hover { text-decoration: underline; }
+        .markdown strong { color: var(--text); }
+
+        .markdown table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 14px 0;
+            font-size: 13px;
+        }
+
+        .markdown th,
+        .markdown td {
+            padding: 10px 8px;
+            text-align: left;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+            vertical-align: top;
+        }
+
+        .markdown th {
+            color: var(--text);
+            text-transform: uppercase;
+            font-size: 11px;
+        }
+
+        .markdown pre {
+            max-width: 100%;
+            overflow-x: auto;
+            background: rgba(0, 0, 0, 0.28);
+            border: 1px solid rgba(148, 163, 184, 0.16);
+            border-radius: 9px;
+            padding: 14px;
+        }
+
+        .pipeline {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 14px;
+        }
+
+        .step-number {
+            display: inline-grid;
+            place-items: center;
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            background: rgba(56, 189, 248, 0.12);
+            color: var(--blue);
+            font-family: "JetBrains Mono", monospace;
+            font-weight: 800;
+            margin-bottom: 14px;
+        }
+
+        .step h3 { margin: 0 0 8px; }
+        .step p { margin: 0; color: var(--muted); line-height: 1.6; }
+
+        .empty {
+            color: var(--muted);
+            border: 1px dashed var(--border);
+            border-radius: var(--radius);
+            padding: 24px;
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        @media (max-width: 820px) {
+            .layout { grid-template-columns: 1fr; }
+            .sidebar {
+                height: auto;
+                position: static;
+                border-right: 0;
+                border-bottom: 1px solid var(--border);
+            }
+            .nav { flex-direction: row; overflow-x: auto; }
+            .nav button { white-space: nowrap; }
+            .main { padding: 24px 18px 34px; }
+            .topbar { flex-direction: column; }
+        }
+    </style>
+</head>
+<body>
+<div class="layout">
+    <aside class="sidebar">
+        <div class="brand">
+            <div class="brand-mark"><i data-lucide="shield-check"></i></div>
+            <div>
+                <h1>Threat Intel Ops</h1>
+                <p>Automated CVE and research radar</p>
+            </div>
+        </div>
+        <nav class="nav">
+            <button class="active" data-page="overview"><i data-lucide="layout-dashboard"></i><span>Overview</span></button>
+            <button data-page="cve"><i data-lucide="shield-alert"></i><span>CVE Radar</span></button>
+            <button data-page="research"><i data-lucide="rss"></i><span>Research Watch</span></button>
+            <button data-page="actions"><i data-lucide="list-checks"></i><span>Defender Actions</span></button>
+            <button data-page="pipeline"><i data-lucide="workflow"></i><span>Pipeline</span></button>
+        </nav>
+    </aside>
+
+    <main class="main">
+        <div class="topbar">
+            <div class="title">
+                <h2 id="page-title">Threat Intelligence Overview</h2>
+                <p id="page-subtitle">Daily operational intelligence from vulnerability, exploitation, and professional research sources.</p>
+            </div>
+            <div class="status-pill"><i data-lucide="activity"></i><span id="status-text">Loading</span></div>
+        </div>
+
+        <section id="page-overview" class="page active">
+            <div id="overview-grid" class="grid"></div>
+            <div class="section-title"><i data-lucide="target"></i><span>Current Priority</span></div>
+            <div id="priority-view"></div>
+        </section>
+
+        <section id="page-cve" class="page">
+            <div id="cve-view"></div>
+        </section>
+
+        <section id="page-research" class="page">
+            <div id="research-view"></div>
+        </section>
+
+        <section id="page-actions" class="page">
+            <div id="actions-view"></div>
+        </section>
+
+        <section id="page-pipeline" class="page">
+            <div class="grid" id="pipeline-stats"></div>
+            <div class="section-title"><i data-lucide="workflow"></i><span>Automation Flow</span></div>
+            <div class="pipeline">
+                <div class="step"><span class="step-number">1</span><h3>Collect</h3><p>Fetches CISA KEV, NVD, FIRST EPSS, and selected professional security research feeds.</p></div>
+                <div class="step"><span class="step-number">2</span><h3>Normalize</h3><p>Writes a constrained JSON array with only three supported content types: CVE radar, research watch, and defender actions.</p></div>
+                <div class="step"><span class="step-number">3</span><h3>Merge</h3><p>Validates allowed fields, deduplicates by kind/date/title, and merges accepted entries into the dashboard data store.</p></div>
+                <div class="step"><span class="step-number">4</span><h3>Render</h3><p>Displays only vetted threat-intelligence sections. Legacy non-security categories are intentionally excluded.</p></div>
+            </div>
+        </section>
+    </main>
+</div>
+
+<script>
+    marked.setOptions({ headerIds: false, mangle: false });
+
+    const pageMeta = {
+        overview: ['Threat Intelligence Overview', 'Daily operational intelligence from vulnerability, exploitation, and professional research sources.'],
+        cve: ['CVE Radar', 'Prioritized vulnerability signals using KEV, CVSS, and EPSS context.'],
+        research: ['Research Watch', 'Recent posts from professional security research teams.'],
+        actions: ['Defender Actions', 'Operational checklist generated from the daily intelligence set.'],
+        pipeline: ['Pipeline', 'How the automation collects, validates, merges, and renders intelligence.'],
+    };
+
+    const state = { data: {}, entries: {} };
+
+    function safeMarkdown(md) {
+        return DOMPurify.sanitize(marked.parse(md || ''));
+    }
+
+    function escapeHtml(value) {
+        return String(value || '').replace(/[&<>"']/g, ch => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+        }[ch]));
+    }
+
+    function entriesFor(kind) {
+        return ((state.data[kind] && state.data[kind].entries) || []).slice();
+    }
+
+    function latest(entries) {
+        return entries.slice().sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')))[0] || null;
+    }
+
+    function countCves(content) {
+        const matches = String(content || '').match(/CVE-\d{4,}-\d{4,}/g);
+        return matches ? new Set(matches).size : 0;
+    }
+
+    function countLinks(content) {
+        const matches = String(content || '').match(/\]\(https?:\/\/[^)]+\)/g);
+        return matches ? matches.length : 0;
+    }
+
+    function card(label, value) {
+        return `<div class="card"><span class="stat-label">${escapeHtml(label)}</span><span class="stat-value">${escapeHtml(value)}</span></div>`;
+    }
+
+    function article(entry, label) {
+        if (!entry) return '<div class="empty">No validated content is available for this section yet.</div>';
+        return `
+            <article class="article">
+                <div class="article-meta"><span>${escapeHtml(entry.date || 'Unknown')}</span><span class="tag">${escapeHtml(label)}</span></div>
+                <h3>${escapeHtml(entry.title || 'Untitled')}</h3>
+                <div class="markdown">${safeMarkdown(entry.content || '')}</div>
+            </article>
+        `;
+    }
+
+    function render() {
+        const cve = latest(entriesFor('cve_radar'));
+        const research = latest(entriesFor('threat_intel'));
+        const actions = latest(entriesFor('defender_actions'));
+        const all = [cve, research, actions].filter(Boolean);
+        const latestDate = all.map(e => e.date).sort().reverse()[0] || 'No data';
+        const cveCount = countCves(cve && cve.content);
+        const sourceCount = countLinks(research && research.content);
+
+        document.getElementById('status-text').textContent = all.length ? 'Data loaded' : 'No data';
+        document.getElementById('overview-grid').innerHTML = [
+            card('Latest date', latestDate),
+            card('Validated sections', all.length),
+            card('CVE signals', cveCount),
+            card('Research links', sourceCount),
+        ].join('');
+
+        document.getElementById('priority-view').innerHTML = article(cve, 'CVE Radar');
+        document.getElementById('cve-view').innerHTML = article(cve, 'CVE Radar');
+        document.getElementById('research-view').innerHTML = article(research, 'Research Watch');
+        document.getElementById('actions-view').innerHTML = article(actions, 'Defender Actions');
+        document.getElementById('pipeline-stats').innerHTML = [
+            card('Collector', 'Python script'),
+            card('Schedule', 'OpenClaw cron'),
+            card('Allowed kinds', '3'),
+            card('Last data date', latestDate),
+        ].join('');
+
+        try { lucide.createIcons(); } catch (e) {}
+    }
+
+    function showPage(page) {
+        document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
+        document.querySelectorAll('.nav button').forEach(el => el.classList.toggle('active', el.dataset.page === page));
+        document.getElementById(`page-${page}`).classList.add('active');
+        document.getElementById('page-title').textContent = pageMeta[page][0];
+        document.getElementById('page-subtitle').textContent = pageMeta[page][1];
+    }
+
+    async function loadData() {
+        try {
+            const response = await fetch('/api/discoveries');
+            state.data = await response.json();
+            render();
+        } catch (error) {
+            document.getElementById('status-text').textContent = 'Load failed';
+            document.getElementById('priority-view').innerHTML = `<div class="empty">Failed to load dashboard data: ${escapeHtml(error.message)}</div>`;
+        }
+    }
+
+    document.querySelectorAll('.nav button').forEach(button => {
+        button.addEventListener('click', () => showPage(button.dataset.page));
+    });
+
+    loadData();
+    try { lucide.createIcons(); } catch (e) {}
+</script>
+</body>
+</html>
