@@ -1,0 +1,41 @@
+{
+  "profile": "MVP policy-gated defensive automation",
+  "history_limit": 100,
+  "trusted_hosts": ["gpd", "homelab-srv01", "localhost"],
+  "protected_cidrs": [
+    "0.0.0.0/8",
+    "10.0.0.0/8",
+    "127.0.0.0/8",
+    "169.254.0.0/16",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "224.0.0.0/4",
+    "100.64.0.0/10",
+    "::1/128",
+    "fc00::/7",
+    "fe80::/10"
+  ],
+  "rules": [
+    {
+      "type": "ssh_bruteforce",
+      "min_severity": "medium",
+      "min_count": 10,
+      "auto_allowed": true,
+      "action": "block_ip_ttl",
+      "ttl_minutes": 120,
+      "description": "Temporarily block a single public source IP after repeated SSH failures."
+    },
+    {
+      "type": "possible_rce",
+      "auto_allowed": false,
+      "action": "collect_evidence",
+      "description": "Collect evidence and require human approval before containment."
+    },
+    {
+      "type": "critical_cve_match",
+      "auto_allowed": false,
+      "action": "create_patch_plan",
+      "description": "Create an exposure and patch plan; do not auto-change production services."
+    }
+  ]
+}
