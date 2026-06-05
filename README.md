@@ -11,6 +11,7 @@ The project collects daily signals from trusted vulnerability and security resea
 - Pipeline Health
 - Pipeline Run History
 - Source Coverage diagnostics
+- Watchlist-based local relevance scoring
 
 ## Data Sources
 
@@ -21,6 +22,11 @@ The project collects daily signals from trusted vulnerability and security resea
 - Palo Alto Unit 42
 - Cisco Talos
 - The DFIR Report
+- Mandiant
+- CrowdStrike
+- Elastic Security
+- Rapid7
+- Huntress
 
 ## Why This Exists
 
@@ -38,6 +44,9 @@ This keeps the UI focused on operationally useful threat intelligence instead of
 dashboard/
   public/index.html          Web dashboard
   server.js                  Small Node.js static/API server with read-only telemetry and pipeline health
+
+config/
+  watchlist.json             Local relevance profile for assets, technologies, and security interests
 
 scripts/
   generate_threat_intel.py   Fetches and formats daily intelligence
@@ -69,7 +78,7 @@ http://localhost:8765
 
 The landing page is a read-only resource monitor for the host running the pipeline. It includes threshold-based health status, the last telemetry update time, telemetry source status, and short in-browser trend charts for CPU, memory, temperature, and network throughput. Threat intelligence views are available in the navigation.
 
-The CVE Radar view supports triage filtering by search text, priority, and CISA KEV status.
+The CVE Radar view supports triage filtering by search text, priority, CISA KEV status, and local watchlist relevance. It shows risk score, relevance score, impact area, and matched watchlist groups.
 
 ## Configuration
 
@@ -81,6 +90,7 @@ COCKY_DASHBOARD_PORT=8765
 THREAT_INTEL_ROOT=/path/to/repo
 THREAT_INTEL_DASHBOARD_DIR=/path/to/repo/dashboard
 THREAT_INTEL_OUTPUT=/path/to/discoveries-generated.json
+THREAT_INTEL_WATCHLIST=/path/to/watchlist.json
 THREAT_INTEL_DISCOVERIES=/path/to/discoveries.json
 THREAT_INTEL_INBOX=/path/to/discoveries-inbox.json
 THREAT_INTEL_PIPELINE_HEALTH=/path/to/pipeline-health.json
@@ -97,6 +107,29 @@ When running the dashboard locally but displaying a remote homelab node, set
 `THREAT_INTEL_PIPELINE_HISTORY_URL` as well when you want local dashboard views
 to mirror the remote run history.
 
+## Local Relevance Watchlist
+
+`config/watchlist.json` defines technologies and security areas that matter to
+the environment. The generator uses this file to raise priority for matching
+CVEs and research posts without changing the trusted source boundaries.
+
+Each watchlist group has:
+
+- `name`
+- `weight`
+- `keywords`
+
+Generated CVE items include:
+
+- `base_risk_score`
+- `risk_score`
+- `relevance_score`
+- `watchlist_matches`
+- `impact_area`
+- `risk_factors`
+
+The dashboard can filter CVEs to watchlist matches only.
+
 ## Automation
 
 The pipeline is compatible with cron or an agent scheduler such as OpenClaw. The agent should only run the shell pipeline and should not edit dashboard data directly:
@@ -111,6 +144,7 @@ bash scripts/discoveries_pipeline.sh
 - The merge step accepts only the three allowed intelligence kinds.
 - Structured CVE and research metadata is allowed only through fixed `items` and `sources` fields.
 - Defender actions are generated as a constrained queue with priority, category, owner, due window, and related CVEs or sources.
+- Local watchlist relevance is deterministic and read from `config/watchlist.json`.
 - Collection diagnostics record source success/failure and item counts for KEV, NVD, EPSS, and each research feed.
 - RSS research entries are filtered by security keywords to avoid conference, interview, or general technology content.
 - Existing entries with the same date and title are updated instead of duplicated.

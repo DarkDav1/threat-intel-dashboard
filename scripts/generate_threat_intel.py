@@ -14,6 +14,7 @@ from xml.etree import ElementTree as ET
 ROOT = Path(os.environ.get('THREAT_INTEL_ROOT', Path(__file__).resolve().parents[1]))
 DASHBOARD_DIR = Path(os.environ.get('THREAT_INTEL_DASHBOARD_DIR', ROOT / 'dashboard'))
 OUT = Path(os.environ.get('THREAT_INTEL_OUTPUT', DASHBOARD_DIR / 'discoveries-generated.json'))
+WATCHLIST_PATH = Path(os.environ.get('THREAT_INTEL_WATCHLIST', ROOT / 'config' / 'watchlist.json'))
 USER_AGENT = 'cocky-threat-intel/1.0'
 
 KEV_URL = 'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json'
@@ -74,6 +75,18 @@ RESEARCH_EXCLUDE_KEYWORDS = [
     'webinar', 'hiring', 'award',
 ]
 
+DEFAULT_WATCHLIST = {
+    'profile': 'Default security operations profile',
+    'description': 'Fallback local relevance profile used when config/watchlist.json is not present.',
+    'groups': [
+        {'name': 'Windows and Identity', 'weight': 14, 'keywords': ['microsoft', 'windows', 'exchange', 'sharepoint', 'active directory', 'entra']},
+        {'name': 'Network Edge', 'weight': 12, 'keywords': ['vpn', 'firewall', 'router', 'gateway', 'fortinet', 'palo alto', 'ivanti']},
+        {'name': 'Linux and Self-hosted Services', 'weight': 10, 'keywords': ['linux', 'openssh', 'nginx', 'apache', 'docker', 'kubernetes', 'postgres']},
+        {'name': 'Developer and CI/CD', 'weight': 8, 'keywords': ['github', 'gitlab', 'jenkins', 'ci/cd', 'pipeline', 'supply chain']},
+        {'name': 'Detection and Response', 'weight': 6, 'keywords': ['detection', 'threat hunting', 'dfir', 'incident response', 'ioc', 'ransomware']},
+    ],
+}
+
 
 def fetch(url, timeout=20):
     req = urllib.request.Request(url, headers={'User-Agent': USER_AGENT})
@@ -119,6 +132,75 @@ def strip_text(value):
     value = re.sub(r'<[^>]+>', ' ', value or '')
     value = html.unescape(value)
     return re.sub(r'\s+', ' ', value).strip()
+
+
+def normalize_watchlist(data):
+    if not isinstance(data, dict):
+        data = DEFAULT_WATCHLIST
+    groups = []
+    for group in data.get('groups', []):
+        if not isinstance(group, dict):
+            continue
+        name = strip_text(str(group.get('name') or '')).strip()
+        keywords = [
+            strip_text(str(keyword)).lower()
+            for keyword in group.get('keywords', [])
+            if isinstance(keyword, str) and strip_text(keyword)
+        ]
+        if not name or not keywords:
+            continue
+        try:
+            weight = int(group.get('weight', 6))
+        except Exception:
+            weight = 6
+        groups.append({
+            'name': name,
+            'weight': max(1, min(weight, 20)),
+            'keywords': sorted(set(keywords)),
+        })
+    if not groups:
+        return normalize_watchlist(DEFAULT_WATCHLIST)
+    return {
+        'profile': strip_text(str(data.get('profile') or DEFAULT_WATCHLIST['profile']))[:80],
+        'description': strip_text(str(data.get('description') or ''))[:220],
+        'groups': groups,
+    }
+
+
+def load_watchlist():
+    try:
+        data = json.loads(WATCHLIST_PATH.read_text(encoding='utf-8'))
+    except Exception:
+        data = DEFAULT_WATCHLIST
+    return normalize_watchlist(data)
+
+
+def watchlist_text(item):
+    values = []
+    for key in ('cve', 'vendor', 'product', 'name', 'title', 'summary', 'severity', 'source', 'category', 'impact_area'):
+        values.append(str(item.get(key, '')))
+    if isinstance(item.get('risk_factors'), list):
+        values.extend(str(value) for value in item.get('risk_factors'))
+    return ' '.join(values).lower()
+
+
+def match_watchlist(item, watchlist):
+    haystack = watchlist_text(item)
+    matches = []
+    for group in watchlist.get('groups', []):
+        matched = [keyword for keyword in group.get('keywords', []) if keyword in haystack]
+        if matched:
+            matches.append({
+                'group': group.get('name', 'Watchlist'),
+                'weight': int(group.get('weight') or 1),
+                'keywords': matched[:5],
+            })
+    matches.sort(key=lambda value: (-int(value.get('weight') or 0), value.get('group') or ''))
+    return matches
+
+
+def relevance_score(matches):
+    return min(25, sum(int(match.get('weight') or 0) for match in matches[:3]))
 
 
 def get_epss(cves):
@@ -287,7 +369,7 @@ def classify_research(item):
     return 'Threat Research'
 
 
-def get_research_watch():
+def get_research_watch(watchlist):
     cutoff = today() - timedelta(days=14)
     items = []
     for source, url in RSS_SOURCES:
@@ -295,8 +377,11 @@ def get_research_watch():
             item_date = parse_date(item.get('date')) or today()
             if item_date >= cutoff and is_security_research(item):
                 item['category'] = classify_research(item)
+                matches = match_watchlist(item, watchlist)
+                item['watchlist_matches'] = matches
+                item['relevance_score'] = relevance_score(matches)
                 items.append(item)
-    items.sort(key=lambda x: x.get('date', ''), reverse=True)
+    items.sort(key=lambda x: (int(x.get('relevance_score') or 0), x.get('date', '')), reverse=True)
     record_source('Research Filter', 'normalization', 'ok', len(items))
     return items[:10]
 
@@ -387,13 +472,13 @@ def calculate_risk(item, is_kev):
     return min(score, 100), factors or ['Review required']
 
 
-def normalize_cve_item(item, source):
+def normalize_cve_item(item, source, watchlist):
     is_kev = source == 'CISA KEV'
     vendor = item.get('vendor', '')
     epss = item.get('epss')
     percentile = item.get('percentile')
     summary = strip_text(item.get('summary') or item.get('name') or '')[:360]
-    risk_score, risk_factors = calculate_risk(item, is_kev)
+    base_risk_score, risk_factors = calculate_risk(item, is_kev)
     normalized = {
         'cve': item.get('cve', ''),
         'product': infer_product_context({**item, 'summary': summary}, is_kev),
@@ -410,24 +495,30 @@ def normalize_cve_item(item, source):
         'url': item.get('url', ''),
         'summary': summary,
         'recommended_action': item.get('action') or 'Review exposure, patch priority, compensating controls, and detection coverage.',
-        'risk_score': risk_score,
+        'base_risk_score': base_risk_score,
         'risk_factors': risk_factors,
     }
     normalized['impact_area'] = infer_impact_area({**item, **normalized})
+    matches = match_watchlist({**item, **normalized}, watchlist)
+    normalized['watchlist_matches'] = matches
+    normalized['relevance_score'] = relevance_score(matches)
+    normalized['risk_score'] = min(100, base_risk_score + normalized['relevance_score'])
+    if normalized['relevance_score']:
+        normalized['risk_factors'] = risk_factors + ['Local relevance']
     normalized['priority'] = priority_for(normalized)
     return normalized
 
 
-def build_cve_items(kev, nvd):
+def build_cve_items(kev, nvd, watchlist):
     items = []
     seen = set()
     for row in kev:
-        normalized = normalize_cve_item(row, 'CISA KEV')
+        normalized = normalize_cve_item(row, 'CISA KEV', watchlist)
         if normalized['cve'] and normalized['cve'] not in seen:
             items.append(normalized)
             seen.add(normalized['cve'])
     for row in nvd:
-        normalized = normalize_cve_item(row, 'NVD')
+        normalized = normalize_cve_item(row, 'NVD', watchlist)
         if normalized['cve'] and normalized['cve'] not in seen:
             items.append(normalized)
             seen.add(normalized['cve'])
@@ -443,10 +534,11 @@ def build_cve_items(kev, nvd):
     return items[:14]
 
 
-def build_action_items(cve_items, research):
+def build_action_items(cve_items, research, watchlist):
     actions = []
     critical = [item for item in cve_items if item.get('priority') == 'Critical']
     high = [item for item in cve_items if item.get('priority') == 'High']
+    relevant = [item for item in cve_items if int(item.get('relevance_score') or 0) > 0]
     impact_counts = {}
     for item in cve_items:
         area = item.get('impact_area') or 'General Software'
@@ -473,6 +565,24 @@ def build_action_items(cve_items, research):
             'owner': 'Security / Asset Owner',
             'due': 'Today' if critical else 'Next review',
             'related': top_areas,
+        })
+
+    if relevant:
+        groups = {}
+        for item in relevant:
+            for match in item.get('watchlist_matches') or []:
+                group = match.get('group')
+                if group:
+                    groups[group] = groups.get(group, 0) + 1
+        top_groups = sorted(groups, key=lambda group: (-groups[group], group))[:3]
+        actions.append({
+            'priority': 'Critical' if critical else 'High',
+            'category': 'Local Relevance',
+            'task': 'Prioritize CVEs that match the local watchlist',
+            'reason': f'{len(relevant)} CVE signals match the {watchlist.get("profile", "local")} watchlist: ' + ', '.join(f'{group} ({groups[group]})' for group in top_groups) + '.',
+            'owner': 'Security / Asset Owner',
+            'due': 'Today',
+            'related': [item.get('cve') for item in relevant[:6]],
         })
 
     if high:
@@ -522,7 +632,7 @@ def build_action_items(cve_items, research):
     return actions
 
 
-def build_collection_summary(cve_items, research, action_items):
+def build_collection_summary(cve_items, research, action_items, watchlist):
     aggregated = {}
     for event in COLLECTION_EVENTS:
         key = (event.get('name'), event.get('kind'))
@@ -550,26 +660,41 @@ def build_collection_summary(cve_items, research, action_items):
         'cve_count': len(cve_items),
         'research_count': len(research),
         'action_count': len(action_items),
+        'watchlist': {
+            'profile': watchlist.get('profile', 'Local watchlist'),
+            'description': watchlist.get('description', ''),
+            'group_count': len(watchlist.get('groups', [])),
+            'matched_cve_count': len([item for item in cve_items if int(item.get('relevance_score') or 0) > 0]),
+            'matched_research_count': len([item for item in research if int(item.get('relevance_score') or 0) > 0]),
+            'groups': [
+                {'name': group.get('name'), 'weight': group.get('weight'), 'keyword_count': len(group.get('keywords', []))}
+                for group in watchlist.get('groups', [])
+            ],
+        },
         'sources': sources,
     }
 
 
 def build_entries():
     date = str(today())
+    watchlist = load_watchlist()
     kev = get_recent_kev()
     nvd = get_recent_nvd()
-    research = get_research_watch()
+    research = get_research_watch(watchlist)
 
-    cve_items = build_cve_items(kev, nvd)
-    action_items = build_action_items(cve_items, research)
-    collection = build_collection_summary(cve_items, research, action_items)
+    cve_items = build_cve_items(kev, nvd, watchlist)
+    action_items = build_action_items(cve_items, research, watchlist)
+    collection = build_collection_summary(cve_items, research, action_items, watchlist)
     cve_rows = []
     for item in cve_items:
+        watchlist_groups = ', '.join(match.get('group', '') for match in (item.get('watchlist_matches') or [])[:2]) or '-'
         cve_rows.append([
             item.get('cve'),
             item.get('product') or item.get('severity', 'UNKNOWN'),
             item.get('priority'),
             item.get('risk_score', 0),
+            item.get('relevance_score', 0),
+            watchlist_groups,
             item.get('impact_area', 'General Software'),
             'KEV' if item.get('kev') else item.get('severity', 'UNKNOWN'),
             f"{item.get('epss'):.3f}" if item.get('epss') is not None else '-',
@@ -580,7 +705,10 @@ def build_entries():
         'Prioritize vulnerabilities that are listed in CISA KEV, have elevated EPSS probability, or were recently published by NVD with high severity. KEV indicates known exploitation and should be treated as a patching or mitigation priority.',
         '',
         '## CVE Radar',
-        md_table(['CVE', 'Product / Severity', 'Priority', 'Risk', 'Impact Area', 'Signal', 'EPSS', 'Date'], cve_rows[:12]) if cve_rows else 'No high-priority CVE signals were collected today.',
+        md_table(['CVE', 'Product / Severity', 'Priority', 'Risk', 'Relevance', 'Watchlist', 'Impact Area', 'Signal', 'EPSS', 'Date'], cve_rows[:12]) if cve_rows else 'No high-priority CVE signals were collected today.',
+        '',
+        '## Local Relevance Profile',
+        f"Profile: {watchlist.get('profile', 'Local watchlist')}. Matched CVEs: {collection['watchlist']['matched_cve_count']}. Matched research posts: {collection['watchlist']['matched_research_count']}.",
         '',
         '## Defender Guidance',
         '- Check internet-facing assets, VPNs, firewalls, identity systems, and common open-source components against the CVE table.',
@@ -596,7 +724,8 @@ def build_entries():
     research_lines = ['## Professional Security Research Watch']
     if research:
         for item in research[:8]:
-            research_lines.append(f"- **{item['source']}** ({item['date']}): [{item['title']}]({item['url']})")
+            relevance = f" relevance {item.get('relevance_score', 0)}" if item.get('relevance_score') else ''
+            research_lines.append(f"- **{item['source']}** ({item['date']} / {item.get('category', 'Threat Research')}{relevance}): [{item['title']}]({item['url']})")
             if item.get('summary'):
                 research_lines.append(f"  - {item['summary']}")
     else:

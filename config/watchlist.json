@@ -1,0 +1,31 @@
+{
+  "profile": "Homelab security operations",
+  "description": "Local relevance profile used to raise priority for technologies commonly present in a small lab, self-hosted services, and cloud-adjacent security workflow.",
+  "groups": [
+    {
+      "name": "Windows and Identity",
+      "weight": 14,
+      "keywords": ["microsoft", "windows", "windows server", "exchange", "sharepoint", "active directory", "entra", "azure ad", "office", "outlook"]
+    },
+    {
+      "name": "Network Edge",
+      "weight": 12,
+      "keywords": ["vpn", "firewall", "router", "gateway", "fortinet", "fortigate", "palo alto", "sonicwall", "ivanti", "citrix", "netscaler"]
+    },
+    {
+      "name": "Linux and Self-hosted Services",
+      "weight": 10,
+      "keywords": ["linux", "ubuntu", "debian", "openssh", "nginx", "apache", "docker", "container", "kubernetes", "postgres", "redis"]
+    },
+    {
+      "name": "Developer and CI/CD",
+      "weight": 8,
+      "keywords": ["github", "gitlab", "jenkins", "ci/cd", "pipeline", "npm", "pypi", "maven", "supply chain", "terraform"]
+    },
+    {
+      "name": "Detection and Response",
+      "weight": 6,
+      "keywords": ["detection", "threat hunting", "dfir", "incident response", "sigma", "yara", "ioc", "telemetry", "ransomware"]
+    }
+  ]
+}

@@ -318,7 +318,7 @@
             background: var(--panel);
         }
 
-        .table-wrap .cve-table { margin: 0; min-width: 1080px; }
+        .table-wrap .cve-table { margin: 0; min-width: 1260px; }
 
         .badge {
             display: inline-flex;
@@ -694,6 +694,7 @@
                     <button data-priority="Watch">Watch</button>
                 </div>
                 <label class="check-filter"><input id="kev-filter" type="checkbox"> KEV only</label>
+                <label class="check-filter"><input id="watchlist-filter" type="checkbox"> Watchlist only</label>
                 <span class="stat-sub" id="cve-filter-count">No filters applied</span>
             </div>
             <div id="cve-table-view"></div>
@@ -750,7 +751,7 @@
         data: {},
         pipeline: null,
         pipelineHistory: [],
-        cveFilters: { query: '', priority: 'all', kevOnly: false },
+        cveFilters: { query: '', priority: 'all', kevOnly: false, watchlistOnly: false },
         samples: [],
         lastNet: null,
         lastNetAt: 0
@@ -796,6 +797,7 @@
         const filters = state.cveFilters;
         if (filters.priority !== 'all' && item.priority !== filters.priority) return false;
         if (filters.kevOnly && !item.kev) return false;
+        if (filters.watchlistOnly && !(Number(item.relevance_score) > 0)) return false;
         const query = filters.query.trim().toLowerCase();
         if (!query) return true;
         const haystack = [
@@ -807,6 +809,7 @@
             item.summary,
             item.recommended_action,
             item.impact_area,
+            Array.isArray(item.watchlist_matches) ? item.watchlist_matches.map(match => `${match.group} ${(match.keywords || []).join(' ')}`).join(' ') : '',
             Array.isArray(item.risk_factors) ? item.risk_factors.join(' ') : '',
         ].join(' ').toLowerCase();
         return haystack.includes(query);
@@ -918,6 +921,11 @@
         return `<div class="factor-list">${factors.slice(0, 4).map(factor => `<span class="factor">${escapeHtml(factor)}</span>`).join('')}</div>`;
     }
 
+    function watchlistChips(matches) {
+        if (!Array.isArray(matches) || !matches.length) return '<span class="muted">--</span>';
+        return `<div class="factor-list">${matches.slice(0, 3).map(match => `<span class="factor">${escapeHtml(match.group || 'Watchlist')}</span>`).join('')}</div>`;
+    }
+
     function article(entry, label) {
         if (!entry) return '<div class="empty">No validated content is available for this section yet.</div>';
         return `
@@ -942,6 +950,7 @@
             const cveCell = item.url ? `<a href="${escapeHtml(item.url)}" target="_blank" rel="noreferrer">${cve}</a>` : cve;
             const signal = item.kev ? 'CISA KEV' : (item.severity || item.source || 'NVD');
             const score = Number.isFinite(Number(item.risk_score)) ? Number(item.risk_score) : 0;
+            const relevance = Number.isFinite(Number(item.relevance_score)) ? Number(item.relevance_score) : 0;
             return `
                 <tr>
                     <td class="mono">${cveCell}</td>
@@ -952,6 +961,8 @@
                     </td>
                     <td>${badge(item.priority)}</td>
                     <td><span class="score-pill">${escapeHtml(score)}</span></td>
+                    <td><span class="score-pill">${escapeHtml(relevance)}</span></td>
+                    <td>${watchlistChips(item.watchlist_matches)}</td>
                     <td>${escapeHtml(item.impact_area || 'General Software')}</td>
                     <td>${escapeHtml(signal)}</td>
                     <td>${item.cvss === null || item.cvss === undefined ? '--' : escapeHtml(item.cvss)}</td>
@@ -965,7 +976,7 @@
             <div class="table-wrap">
                 <table class="cve-table">
                     <thead>
-                        <tr><th>CVE</th><th>Product / Context</th><th>Priority</th><th>Risk</th><th>Impact Area</th><th>Signal</th><th>CVSS</th><th>EPSS</th><th>Date</th><th>Action</th></tr>
+                        <tr><th>CVE</th><th>Product / Context</th><th>Priority</th><th>Risk</th><th>Relevance</th><th>Watchlist</th><th>Impact Area</th><th>Signal</th><th>CVSS</th><th>EPSS</th><th>Date</th><th>Action</th></tr>
                     </thead>
                     <tbody>${rows}</tbody>
                 </table>
@@ -986,6 +997,8 @@
                     <td>${escapeHtml(item.date || '--')}</td>
                     <td>${escapeHtml(item.source || 'Unknown source')}</td>
                     <td>${badge(item.category || 'Threat Research')}</td>
+                    <td><span class="score-pill">${escapeHtml(Number(item.relevance_score) || 0)}</span></td>
+                    <td>${watchlistChips(item.watchlist_matches)}</td>
                     <td>
                         <strong>${titleCell}</strong>
                         <div class="muted">${escapeHtml(item.summary || '').slice(0, 220)}</div>
@@ -996,7 +1009,7 @@
         return `
             <div class="table-wrap">
                 <table class="cve-table">
-                    <thead><tr><th>Date</th><th>Source</th><th>Category</th><th>Post</th></tr></thead>
+                    <thead><tr><th>Date</th><th>Source</th><th>Category</th><th>Relevance</th><th>Watchlist</th><th>Post</th></tr></thead>
                     <tbody>${rows}</tbody>
                 </table>
             </div>
@@ -1061,6 +1074,8 @@
                 ${statCard('Failed sources', collection.failed_source_count ?? collection.sources.filter(s => s.status !== 'ok').length)}
                 ${statCard('CVE items', collection.cve_count ?? '--')}
                 ${statCard('Research items', collection.research_count ?? '--')}
+                ${statCard('Watchlist profile', collection.watchlist ? collection.watchlist.profile : '--')}
+                ${statCard('Watchlist CVEs', collection.watchlist ? collection.watchlist.matched_cve_count : '--')}
             </div>
             <div class="table-wrap run-card">
                 <table class="cve-table">
@@ -1174,6 +1189,7 @@
         const collection = entryCollection(cve) || entryCollection(research) || entryCollection(actions);
         const criticalCount = cveItems.filter(item => item.priority === 'Critical').length;
         const highCount = cveItems.filter(item => item.priority === 'High').length;
+        const watchlistCveCount = cveItems.filter(item => Number(item.relevance_score) > 0).length;
         const cveCount = cveItems.length || countCves(cve && cve.content);
         const sourceCount = (Array.isArray(research && research.sources) ? research.sources.length : 0) || countLinks(research && research.content);
         const topRisk = cveItems.reduce((max, item) => Math.max(max, Number(item.risk_score) || 0), 0);
@@ -1186,6 +1202,7 @@
             statCard('Validated sections', all.length),
             statCard('CVE signals', cveCount),
             statCard('Top risk score', topRisk || '--'),
+            statCard('Watchlist CVEs', watchlistCveCount || '--'),
             statCard('Impact areas', impactAreas.size || '--'),
             statCard('Research links', sourceCount),
         ].join('');
@@ -1196,6 +1213,7 @@
             statCard('Critical', criticalCount),
             statCard('High', highCount),
             statCard('KEV matches', cveItems.filter(item => item.kev).length),
+            statCard('Watchlist matches', watchlistCveCount || '--'),
             statCard('Impact areas', impactAreas.size || '--'),
         ].join('');
         document.getElementById('cve-table-view').innerHTML = renderCveTable(cve);
@@ -1204,6 +1222,7 @@
             statCard('Research items', researchItems.length),
             statCard('Sources', new Set(researchItems.map(item => item.source).filter(Boolean)).size || '--'),
             statCard('Categories', researchCategories.size || '--'),
+            statCard('Watchlist matches', researchItems.filter(item => Number(item.relevance_score) > 0).length || '--'),
             statCard('Latest date', researchItems.map(item => item.date).sort().reverse()[0] || '--'),
         ].join('');
         document.getElementById('research-list-view').innerHTML = renderResearchList(research);
@@ -1354,6 +1373,14 @@
     if (kevFilter) {
         kevFilter.addEventListener('change', () => {
             state.cveFilters.kevOnly = kevFilter.checked;
+            renderIntel();
+        });
+    }
+
+    const watchlistFilter = document.getElementById('watchlist-filter');
+    if (watchlistFilter) {
+        watchlistFilter.addEventListener('change', () => {
+            state.cveFilters.watchlistOnly = watchlistFilter.checked;
             renderIntel();
         });
     }
