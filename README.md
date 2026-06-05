@@ -79,7 +79,13 @@ THREAT_INTEL_DASHBOARD_DIR=/path/to/repo/dashboard
 THREAT_INTEL_OUTPUT=/path/to/discoveries-generated.json
 THREAT_INTEL_DISCOVERIES=/path/to/discoveries.json
 THREAT_INTEL_INBOX=/path/to/discoveries-inbox.json
+THREAT_INTEL_SYSTEM_URL=http://remote-host:8765/api/system
+THREAT_INTEL_DISCOVERIES_URL=http://remote-host:8765/api/discoveries
 ```
+
+When running the dashboard locally but displaying a remote homelab node, set
+`THREAT_INTEL_SYSTEM_URL` and `THREAT_INTEL_DISCOVERIES_URL` to the remote
+dashboard API endpoints.
 
 ## Automation
 

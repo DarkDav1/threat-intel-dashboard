@@ -12,6 +12,8 @@ const HOST = process.env.COCKY_DASHBOARD_HOST || '0.0.0.0';
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const DASHBOARD_ROOT = process.env.THREAT_INTEL_DASHBOARD_DIR || __dirname;
 const DISCOVERIES_FILE = path.join(DASHBOARD_ROOT, 'discoveries.json');
+const REMOTE_SYSTEM_URL = process.env.THREAT_INTEL_SYSTEM_URL || '';
+const REMOTE_DISCOVERIES_URL = process.env.THREAT_INTEL_DISCOVERIES_URL || '';
 
 const MIME_TYPES = {
     '.html': 'text/html; charset=utf-8',
@@ -31,15 +33,47 @@ function sendJson(res, status, payload) {
     res.end(JSON.stringify(payload));
 }
 
+function fetchJson(url, timeoutMs = 5000) {
+    return new Promise((resolve, reject) => {
+        const parsed = new URL(url);
+        const transport = parsed.protocol === 'https:' ? require('https') : require('http');
+        const request = transport.request(parsed, { method: 'GET', timeout: timeoutMs }, response => {
+            let raw = '';
+            response.setEncoding('utf8');
+            response.on('data', chunk => { raw += chunk; });
+            response.on('end', () => {
+                if (response.statusCode < 200 || response.statusCode >= 300) {
+                    reject(new Error(`Remote API returned ${response.statusCode}`));
+                    return;
+                }
+                try {
+                    resolve(JSON.parse(raw));
+                } catch (error) {
+                    reject(new Error('Remote API returned invalid JSON'));
+                }
+            });
+        });
+        request.on('timeout', () => request.destroy(new Error('Remote API timeout')));
+        request.on('error', reject);
+        request.end();
+    });
+}
+
+function normalizeDiscoveries(data) {
+    return {
+        cve_radar: data.cve_radar || { entries: [] },
+        threat_intel: data.threat_intel || { entries: [] },
+        defender_actions: data.defender_actions || { entries: [] },
+    };
+}
+
 async function readDiscoveries() {
     try {
+        if (REMOTE_DISCOVERIES_URL) {
+            return normalizeDiscoveries(await fetchJson(REMOTE_DISCOVERIES_URL));
+        }
         const raw = await fs.readFile(DISCOVERIES_FILE, 'utf-8');
-        const data = JSON.parse(raw);
-        return {
-            cve_radar: data.cve_radar || { entries: [] },
-            threat_intel: data.threat_intel || { entries: [] },
-            defender_actions: data.defender_actions || { entries: [] },
-        };
+        return normalizeDiscoveries(JSON.parse(raw));
     } catch (error) {
         return {
             cve_radar: { entries: [] },
@@ -131,6 +165,11 @@ async function getTopProcesses() {
 }
 
 async function getSystemInfo() {
+    if (REMOTE_SYSTEM_URL) {
+        const remote = await fetchJson(REMOTE_SYSTEM_URL);
+        return { ...remote, proxied: true, resourceSource: REMOTE_SYSTEM_URL };
+    }
+
     const cpus = os.cpus();
     const load = os.loadavg()[0] || 0;
     const memTotal = os.totalmem();
