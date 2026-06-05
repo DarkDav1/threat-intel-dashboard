@@ -71,6 +71,38 @@ function normalizeDiscoveries(data) {
     };
 }
 
+function pipelineFreshness(pipeline) {
+    const finished = pipeline && pipeline.finished_at ? new Date(pipeline.finished_at) : null;
+    if (!finished || Number.isNaN(finished.getTime())) {
+        return {
+            status: 'unknown',
+            age_minutes: null,
+            age_label: 'No completed run recorded',
+            message: 'No completed pipeline run has been recorded yet.',
+        };
+    }
+    const ageMinutes = Math.max(0, Math.round((Date.now() - finished.getTime()) / 60000));
+    const ageHours = ageMinutes / 60;
+    let status = 'fresh';
+    let message = 'Pipeline output is fresh.';
+    if (ageHours >= 24) {
+        status = 'stale';
+        message = 'Pipeline output is older than 24 hours.';
+    } else if (ageHours >= 8) {
+        status = 'warning';
+        message = 'Pipeline output is older than 8 hours.';
+    }
+    const ageLabel = ageMinutes < 60
+        ? `${ageMinutes}m old`
+        : `${Math.floor(ageMinutes / 60)}h ${ageMinutes % 60}m old`;
+    return { status, age_minutes: ageMinutes, age_label: ageLabel, message };
+}
+
+function enrichPipelineHealth(pipeline) {
+    const normalized = pipeline && typeof pipeline === 'object' ? pipeline : {};
+    return { ...normalized, freshness: pipelineFreshness(normalized) };
+}
+
 async function readDiscoveries() {
     try {
         if (REMOTE_DISCOVERIES_URL) {
@@ -90,12 +122,12 @@ async function readDiscoveries() {
 async function readPipelineHealth() {
     try {
         if (REMOTE_PIPELINE_URL) {
-            return await fetchJson(REMOTE_PIPELINE_URL);
+            return enrichPipelineHealth(await fetchJson(REMOTE_PIPELINE_URL));
         }
         const raw = await fs.readFile(PIPELINE_HEALTH_FILE, 'utf-8');
-        return JSON.parse(raw);
+        return enrichPipelineHealth(JSON.parse(raw));
     } catch (error) {
-        return {
+        return enrichPipelineHealth({
             status: 'unknown',
             stage: 'unknown',
             exit_code: null,
@@ -105,7 +137,7 @@ async function readPipelineHealth() {
             generated_items: null,
             append: null,
             merge: null,
-        };
+        });
     }
 }
 
@@ -267,6 +299,7 @@ async function getHealth() {
             status: pipeline.status,
             stage: pipeline.stage,
             finished_at: pipeline.finished_at,
+            freshness: pipeline.freshness,
         },
     };
 }

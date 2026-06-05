@@ -44,6 +44,31 @@ SECURITY_RESEARCH_KEYWORDS = [
     'threat', 'threat hunting', 'ttp', 'vulnerability', 'zero-day',
 ]
 
+IMPACT_RULES = [
+    ('Network Edge', ['vpn', 'firewall', 'gateway', 'router', 'fortinet', 'fortigate', 'palo alto', 'netscaler', 'citrix adc', 'f5', 'ivanti', 'sonicwall']),
+    ('Identity', ['active directory', 'entra', 'azure ad', 'ldap', 'saml', 'oauth', 'identity', 'credential', 'authentication']),
+    ('Windows', ['microsoft windows', 'windows server', 'exchange', 'sharepoint', 'office', 'outlook', 'internet explorer', 'edge']),
+    ('Linux / Unix', ['linux', 'ubuntu', 'debian', 'red hat', 'rhel', 'kernel', 'sudo', 'openssh', 'unix']),
+    ('Cloud / Container', ['aws', 'azure', 'gcp', 'cloud', 'kubernetes', 'docker', 'container', 'helm', 'terraform']),
+    ('Developer Tooling', ['github', 'gitlab', 'jenkins', 'ci/cd', 'pipeline', 'build', 'npm', 'pypi', 'maven']),
+    ('Application Server', ['apache', 'nginx', 'tomcat', 'weblogic', 'jboss', 'iis', 'struts', 'spring']),
+    ('Database', ['postgres', 'mysql', 'mssql', 'oracle database', 'mongodb', 'redis', 'elasticsearch']),
+    ('Browser / Endpoint', ['browser', 'chrome', 'firefox', 'safari', 'endpoint', 'edr', 'adobe', 'acrobat']),
+]
+
+EXPLOIT_KEYWORDS = ['remote code execution', 'execute arbitrary code', 'rce', 'command injection', 'deserialization']
+AUTH_BYPASS_KEYWORDS = ['authentication bypass', 'auth bypass', 'privilege escalation', 'elevation of privilege']
+PUBLIC_EXPOSURE_KEYWORDS = ['internet-facing', 'remote attacker', 'network', 'crafted request', 'web request']
+
+RESEARCH_CATEGORY_RULES = [
+    ('Active Exploitation', ['active exploitation', 'exploited in the wild', 'zero-day', 'kev', 'intrusion', 'campaign']),
+    ('Malware / Ransomware', ['malware', 'ransomware', 'backdoor', 'loader', 'botnet', 'trojan']),
+    ('Detection Engineering', ['detection', 'hunt', 'hunting', 'sigma', 'yara', 'telemetry', 'ioc']),
+    ('Cloud / Identity', ['cloud', 'identity', 'azure', 'aws', 'gcp', 'entra', 'oauth', 'saml']),
+    ('Vulnerability Research', ['cve', 'vulnerability', 'exploit', 'patch', 'remote code execution']),
+    ('Incident Response', ['dfir', 'incident', 'forensic', 'breach', 'response']),
+]
+
 RESEARCH_EXCLUDE_KEYWORDS = [
     'conference', 'cisco live', 'good boys', 'ironman', 'podcast',
     'webinar', 'hiring', 'award',
@@ -254,6 +279,14 @@ def is_security_research(item):
     return any(term in haystack for term in SECURITY_RESEARCH_KEYWORDS)
 
 
+def classify_research(item):
+    haystack = f"{item.get('title', '')} {item.get('summary', '')}".lower()
+    for category, keywords in RESEARCH_CATEGORY_RULES:
+        if any(keyword in haystack for keyword in keywords):
+            return category
+    return 'Threat Research'
+
+
 def get_research_watch():
     cutoff = today() - timedelta(days=14)
     items = []
@@ -261,6 +294,7 @@ def get_research_watch():
         for item in parse_feed(source, url):
             item_date = parse_date(item.get('date')) or today()
             if item_date >= cutoff and is_security_research(item):
+                item['category'] = classify_research(item)
                 items.append(item)
     items.sort(key=lambda x: x.get('date', ''), reverse=True)
     record_source('Research Filter', 'normalization', 'ok', len(items))
@@ -274,8 +308,10 @@ def md_table(headers, rows):
 
 
 def priority_for(item):
-    if item.get('kev'):
+    if item.get('kev') or int(item.get('risk_score') or 0) >= 85:
         return 'Critical'
+    if int(item.get('risk_score') or 0) >= 70:
+        return 'High'
     epss = float(item.get('epss') or 0)
     cvss = float(item.get('cvss') or 0)
     if epss >= 0.20 or cvss >= 9.8:
@@ -283,15 +319,84 @@ def priority_for(item):
     return 'Watch'
 
 
+def infer_impact_area(item):
+    text = ' '.join(str(item.get(key, '')) for key in ('vendor', 'product', 'name', 'summary', 'severity')).lower()
+    for area, keywords in IMPACT_RULES:
+        if any(keyword in text for keyword in keywords):
+            return area
+    return 'General Software'
+
+
+def infer_product_context(item, is_kev):
+    if is_kev:
+        return f"{item.get('vendor', '')} {item.get('product', '')}".strip()
+    summary = item.get('summary', '')
+    for pattern in (
+        r'^(.*?) contains? ',
+        r'^(.*?) allows? ',
+        r'^(.*?) before ',
+        r'^(.*?) versions? ',
+    ):
+        match = re.search(pattern, summary, flags=re.I)
+        if match:
+            value = strip_text(match.group(1)).strip(' .,:;')
+            if 3 <= len(value) <= 90:
+                return value
+    return item.get('severity', 'UNKNOWN')
+
+
+def calculate_risk(item, is_kev):
+    score = 0
+    factors = []
+    cvss = float(item.get('cvss') or 0)
+    epss = float(item.get('epss') or 0)
+    percentile = float(item.get('percentile') or 0)
+    summary = strip_text(item.get('summary') or item.get('name') or '').lower()
+
+    if is_kev:
+        score += 45
+        factors.append('CISA KEV')
+    if cvss >= 9.8:
+        score += 22
+        factors.append('CVSS critical')
+    elif cvss >= 8.8:
+        score += 15
+        factors.append('CVSS high')
+    if epss >= 0.50:
+        score += 22
+        factors.append('EPSS very high')
+    elif epss >= 0.20:
+        score += 16
+        factors.append('EPSS elevated')
+    elif percentile >= 0.95:
+        score += 12
+        factors.append('EPSS top percentile')
+    if str(item.get('known_ransomware', '')).lower() == 'known':
+        score += 10
+        factors.append('Ransomware linked')
+    if any(term in summary for term in EXPLOIT_KEYWORDS):
+        score += 10
+        factors.append('Code execution')
+    if any(term in summary for term in AUTH_BYPASS_KEYWORDS):
+        score += 8
+        factors.append('Auth or privilege impact')
+    if any(term in summary for term in PUBLIC_EXPOSURE_KEYWORDS):
+        score += 6
+        factors.append('Remote attack surface')
+
+    return min(score, 100), factors or ['Review required']
+
+
 def normalize_cve_item(item, source):
     is_kev = source == 'CISA KEV'
     vendor = item.get('vendor', '')
-    product = item.get('product', '')
     epss = item.get('epss')
     percentile = item.get('percentile')
+    summary = strip_text(item.get('summary') or item.get('name') or '')[:360]
+    risk_score, risk_factors = calculate_risk(item, is_kev)
     normalized = {
         'cve': item.get('cve', ''),
-        'product': f'{vendor} {product}'.strip() if is_kev else item.get('severity', 'UNKNOWN'),
+        'product': infer_product_context({**item, 'summary': summary}, is_kev),
         'vendor': vendor,
         'severity': item.get('severity') or ('KNOWN EXPLOITED' if is_kev else 'UNKNOWN'),
         'cvss': item.get('cvss'),
@@ -303,9 +408,12 @@ def normalize_cve_item(item, source):
         'due_date': item.get('due_date', ''),
         'source': source,
         'url': item.get('url', ''),
-        'summary': strip_text(item.get('summary') or item.get('name') or '')[:360],
+        'summary': summary,
         'recommended_action': item.get('action') or 'Review exposure, patch priority, compensating controls, and detection coverage.',
+        'risk_score': risk_score,
+        'risk_factors': risk_factors,
     }
+    normalized['impact_area'] = infer_impact_area({**item, **normalized})
     normalized['priority'] = priority_for(normalized)
     return normalized
 
@@ -327,6 +435,7 @@ def build_cve_items(kev, nvd):
     priority_rank = {'Critical': 0, 'High': 1, 'Watch': 2}
     items.sort(key=lambda item: (
         priority_rank.get(item.get('priority'), 9),
+        -(int(item.get('risk_score') or 0)),
         -(float(item.get('epss') or 0)),
         -(float(item.get('cvss') or 0)),
         item.get('date') or '',
@@ -338,6 +447,11 @@ def build_action_items(cve_items, research):
     actions = []
     critical = [item for item in cve_items if item.get('priority') == 'Critical']
     high = [item for item in cve_items if item.get('priority') == 'High']
+    impact_counts = {}
+    for item in cve_items:
+        area = item.get('impact_area') or 'General Software'
+        impact_counts[area] = impact_counts.get(area, 0) + 1
+    top_areas = sorted(impact_counts, key=lambda area: (-impact_counts[area], area))[:3]
 
     if critical:
         actions.append({
@@ -348,6 +462,17 @@ def build_action_items(cve_items, research):
             'owner': 'Security / Infrastructure',
             'due': 'Today',
             'related': [item.get('cve') for item in critical[:6]],
+        })
+
+    if top_areas:
+        actions.append({
+            'priority': 'High' if critical or high else 'Watch',
+            'category': 'Asset Mapping',
+            'task': 'Map CVE exposure by affected technology area',
+            'reason': 'Daily CVE signals cluster around: ' + ', '.join(f'{area} ({impact_counts[area]})' for area in top_areas) + '.',
+            'owner': 'Security / Asset Owner',
+            'due': 'Today' if critical else 'Next review',
+            'related': top_areas,
         })
 
     if high:
@@ -444,6 +569,8 @@ def build_entries():
             item.get('cve'),
             item.get('product') or item.get('severity', 'UNKNOWN'),
             item.get('priority'),
+            item.get('risk_score', 0),
+            item.get('impact_area', 'General Software'),
             'KEV' if item.get('kev') else item.get('severity', 'UNKNOWN'),
             f"{item.get('epss'):.3f}" if item.get('epss') is not None else '-',
             item.get('date'),
@@ -453,7 +580,7 @@ def build_entries():
         'Prioritize vulnerabilities that are listed in CISA KEV, have elevated EPSS probability, or were recently published by NVD with high severity. KEV indicates known exploitation and should be treated as a patching or mitigation priority.',
         '',
         '## CVE Radar',
-        md_table(['CVE', 'Product / Severity', 'Priority', 'Signal', 'EPSS', 'Date'], cve_rows[:12]) if cve_rows else 'No high-priority CVE signals were collected today.',
+        md_table(['CVE', 'Product / Severity', 'Priority', 'Risk', 'Impact Area', 'Signal', 'EPSS', 'Date'], cve_rows[:12]) if cve_rows else 'No high-priority CVE signals were collected today.',
         '',
         '## Defender Guidance',
         '- Check internet-facing assets, VPNs, firewalls, identity systems, and common open-source components against the CVE table.',

@@ -318,7 +318,7 @@
             background: var(--panel);
         }
 
-        .table-wrap .cve-table { margin: 0; min-width: 920px; }
+        .table-wrap .cve-table { margin: 0; min-width: 1080px; }
 
         .badge {
             display: inline-flex;
@@ -356,6 +356,43 @@
             color: var(--red);
             border-color: rgba(251, 113, 133, 0.32);
             background: rgba(251, 113, 133, 0.1);
+        }
+
+        .badge.warning {
+            color: var(--yellow);
+            border-color: rgba(250, 204, 21, 0.32);
+            background: rgba(250, 204, 21, 0.1);
+        }
+
+        .score-pill {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 42px;
+            height: 28px;
+            border-radius: 999px;
+            font-family: "JetBrains Mono", monospace;
+            font-size: 12px;
+            font-weight: 800;
+            color: var(--text);
+            background: rgba(56, 189, 248, 0.12);
+            border: 1px solid rgba(56, 189, 248, 0.28);
+        }
+
+        .factor-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            margin-top: 7px;
+        }
+
+        .factor {
+            border-radius: 999px;
+            padding: 2px 7px;
+            font-size: 11px;
+            color: var(--muted);
+            background: rgba(148, 163, 184, 0.09);
+            border: 1px solid rgba(148, 163, 184, 0.16);
         }
 
         .filter-bar {
@@ -663,7 +700,13 @@
             <div class="section-title"><i data-lucide="file-text"></i><span>Assessment Notes</span></div>
             <div id="cve-view"></div>
         </section>
-        <section id="page-research" class="page"><div id="research-view"></div></section>
+        <section id="page-research" class="page">
+            <div id="research-summary-grid" class="grid"></div>
+            <div class="section-title"><i data-lucide="rss"></i><span>Research Items</span></div>
+            <div id="research-list-view"></div>
+            <div class="section-title"><i data-lucide="file-text"></i><span>Research Notes</span></div>
+            <div id="research-view"></div>
+        </section>
         <section id="page-actions" class="page">
             <div id="actions-summary-grid" class="grid"></div>
             <div class="section-title"><i data-lucide="list-checks"></i><span>Action Queue</span></div>
@@ -763,6 +806,8 @@
             item.source,
             item.summary,
             item.recommended_action,
+            item.impact_area,
+            Array.isArray(item.risk_factors) ? item.risk_factors.join(' ') : '',
         ].join(' ').toLowerCase();
         return haystack.includes(query);
     }
@@ -860,8 +905,17 @@
     function badge(value) {
         const label = String(value || 'Watch');
         const lower = label.toLowerCase();
-        const cls = lower === 'critical' ? 'critical' : lower === 'high' ? 'high' : lower === 'ok' ? 'ok' : lower === 'failed' ? 'failed' : '';
+        const cls = lower === 'critical' || lower === 'stale' ? 'critical'
+            : lower === 'high' || lower === 'warning' ? 'high'
+            : lower === 'ok' || lower === 'fresh' ? 'ok'
+            : lower === 'failed' ? 'failed'
+            : '';
         return `<span class="badge ${cls}">${escapeHtml(label)}</span>`;
+    }
+
+    function factorChips(factors) {
+        if (!Array.isArray(factors) || !factors.length) return '';
+        return `<div class="factor-list">${factors.slice(0, 4).map(factor => `<span class="factor">${escapeHtml(factor)}</span>`).join('')}</div>`;
     }
 
     function article(entry, label) {
@@ -887,14 +941,18 @@
             const cve = escapeHtml(item.cve || 'Unknown');
             const cveCell = item.url ? `<a href="${escapeHtml(item.url)}" target="_blank" rel="noreferrer">${cve}</a>` : cve;
             const signal = item.kev ? 'CISA KEV' : (item.severity || item.source || 'NVD');
+            const score = Number.isFinite(Number(item.risk_score)) ? Number(item.risk_score) : 0;
             return `
                 <tr>
                     <td class="mono">${cveCell}</td>
                     <td>
                         <strong>${escapeHtml(item.product || item.vendor || 'Unknown product')}</strong>
                         <div class="muted">${escapeHtml(item.summary || '').slice(0, 150)}</div>
+                        ${factorChips(item.risk_factors)}
                     </td>
                     <td>${badge(item.priority)}</td>
+                    <td><span class="score-pill">${escapeHtml(score)}</span></td>
+                    <td>${escapeHtml(item.impact_area || 'General Software')}</td>
                     <td>${escapeHtml(signal)}</td>
                     <td>${item.cvss === null || item.cvss === undefined ? '--' : escapeHtml(item.cvss)}</td>
                     <td>${formatPercent(item.epss)}</td>
@@ -907,8 +965,38 @@
             <div class="table-wrap">
                 <table class="cve-table">
                     <thead>
-                        <tr><th>CVE</th><th>Product / Context</th><th>Priority</th><th>Signal</th><th>CVSS</th><th>EPSS</th><th>Date</th><th>Action</th></tr>
+                        <tr><th>CVE</th><th>Product / Context</th><th>Priority</th><th>Risk</th><th>Impact Area</th><th>Signal</th><th>CVSS</th><th>EPSS</th><th>Date</th><th>Action</th></tr>
                     </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+        `;
+    }
+
+    function renderResearchList(entry) {
+        const items = entryItems(entry);
+        if (!items.length) {
+            return '<div class="empty">No structured research items are available yet.</div>';
+        }
+        const rows = items.map(item => {
+            const title = escapeHtml(item.title || 'Untitled research');
+            const titleCell = item.url ? `<a href="${escapeHtml(item.url)}" target="_blank" rel="noreferrer">${title}</a>` : title;
+            return `
+                <tr>
+                    <td>${escapeHtml(item.date || '--')}</td>
+                    <td>${escapeHtml(item.source || 'Unknown source')}</td>
+                    <td>${badge(item.category || 'Threat Research')}</td>
+                    <td>
+                        <strong>${titleCell}</strong>
+                        <div class="muted">${escapeHtml(item.summary || '').slice(0, 220)}</div>
+                    </td>
+                </tr>
+            `;
+        }).join('');
+        return `
+            <div class="table-wrap">
+                <table class="cve-table">
+                    <thead><tr><th>Date</th><th>Source</th><th>Category</th><th>Post</th></tr></thead>
                     <tbody>${rows}</tbody>
                 </table>
             </div>
@@ -1032,6 +1120,8 @@
         if (temp !== null && temp >= 85) critical.push('CPU temperature is very high');
         else if (temp !== null && temp >= 75) warnings.push('CPU temperature is elevated');
         if (pipelineStatus && pipelineStatus !== 'ok') warnings.push('Pipeline is not healthy');
+        if (state.pipeline && state.pipeline.freshness && state.pipeline.freshness.status === 'stale') critical.push('Pipeline data is stale');
+        else if (state.pipeline && state.pipeline.freshness && state.pipeline.freshness.status === 'warning') warnings.push('Pipeline data is aging');
 
         const status = critical.length ? 'Critical' : warnings.length ? 'Warning' : 'OK';
         const detail = critical.concat(warnings);
@@ -1045,8 +1135,10 @@
         const merge = pipeline.merge || {};
         const append = pipeline.append || {};
         const status = pipeline.status || 'unknown';
+        const freshness = pipeline.freshness || {};
         document.getElementById('pipeline-stats').innerHTML = [
             statCard('Status', status.toUpperCase()),
+            statCard('Freshness', freshness.age_label || 'Unknown'),
             statCard('Last finished', formatDateTime(pipeline.finished_at)),
             statCard('Generated items', pipeline.generated_items ?? '--'),
             statCard('Failed sources', collection ? collection.failed_source_count : '--'),
@@ -1055,13 +1147,14 @@
         const rejected = Array.isArray(merge.rejected) ? merge.rejected.length : 0;
         document.getElementById('pipeline-run').innerHTML = `
             <div class="card run-card">
-                <div class="article-meta"><span>${badge(status === 'ok' ? 'OK' : status)}</span><span class="mono">${escapeHtml(pipeline.stage || 'unknown')}</span></div>
+                <div class="article-meta"><span>${badge(status === 'ok' ? 'OK' : status)}</span><span>${badge(freshness.status || 'unknown')}</span><span class="mono">${escapeHtml(pipeline.stage || 'unknown')}</span></div>
                 <div class="grid">
                     ${statCard('Appended', append.appended ?? '--')}
                     ${statCard('Merged', merge.merged ?? '--')}
                     ${statCard('Updated', merge.updated ?? '--')}
                     ${statCard('Rejected', rejected)}
                 </div>
+                <div class="stat-sub">${escapeHtml(freshness.message || 'No freshness state recorded.')}</div>
                 <div class="stat-sub">${escapeHtml(pipeline.message || 'No pipeline message recorded.')}</div>
             </div>
         `;
@@ -1076,18 +1169,24 @@
         const all = [cve, research, actions].filter(Boolean);
         const latestDate = all.map(e => e.date).sort().reverse()[0] || 'No data';
         const cveItems = entryItems(cve);
+        const researchItems = entryItems(research);
         const actionItems = entryItems(actions);
         const collection = entryCollection(cve) || entryCollection(research) || entryCollection(actions);
         const criticalCount = cveItems.filter(item => item.priority === 'Critical').length;
         const highCount = cveItems.filter(item => item.priority === 'High').length;
         const cveCount = cveItems.length || countCves(cve && cve.content);
         const sourceCount = (Array.isArray(research && research.sources) ? research.sources.length : 0) || countLinks(research && research.content);
+        const topRisk = cveItems.reduce((max, item) => Math.max(max, Number(item.risk_score) || 0), 0);
+        const impactAreas = new Set(cveItems.map(item => item.impact_area).filter(Boolean));
+        const researchCategories = new Set(researchItems.map(item => item.category).filter(Boolean));
 
         setText('overview-grid', '');
         document.getElementById('overview-grid').innerHTML = [
             statCard('Latest date', latestDate),
             statCard('Validated sections', all.length),
             statCard('CVE signals', cveCount),
+            statCard('Top risk score', topRisk || '--'),
+            statCard('Impact areas', impactAreas.size || '--'),
             statCard('Research links', sourceCount),
         ].join('');
 
@@ -1097,9 +1196,17 @@
             statCard('Critical', criticalCount),
             statCard('High', highCount),
             statCard('KEV matches', cveItems.filter(item => item.kev).length),
+            statCard('Impact areas', impactAreas.size || '--'),
         ].join('');
         document.getElementById('cve-table-view').innerHTML = renderCveTable(cve);
         document.getElementById('cve-view').innerHTML = article(cve, 'CVE Radar');
+        document.getElementById('research-summary-grid').innerHTML = [
+            statCard('Research items', researchItems.length),
+            statCard('Sources', new Set(researchItems.map(item => item.source).filter(Boolean)).size || '--'),
+            statCard('Categories', researchCategories.size || '--'),
+            statCard('Latest date', researchItems.map(item => item.date).sort().reverse()[0] || '--'),
+        ].join('');
+        document.getElementById('research-list-view').innerHTML = renderResearchList(research);
         document.getElementById('research-view').innerHTML = article(research, 'Research Watch');
         document.getElementById('actions-summary-grid').innerHTML = [
             statCard('Open actions', actionItems.length),
