@@ -13,6 +13,7 @@ ALLOWED_KINDS = {
     'threat_intel', 'cve_radar', 'defender_actions'
 }
 OPTIONAL_FIELDS = {'items', 'sources'}
+OPTIONAL_OBJECT_FIELDS = {'collection'}
 
 
 def keep_optional_fields(item):
@@ -20,6 +21,10 @@ def keep_optional_fields(item):
     for field in OPTIONAL_FIELDS:
         value = item.get(field)
         if isinstance(value, list):
+            kept[field] = value
+    for field in OPTIONAL_OBJECT_FIELDS:
+        value = item.get(field)
+        if isinstance(value, dict):
             kept[field] = value
     return kept
 
@@ -83,7 +88,7 @@ def main():
         if existing:
             changed = existing.get('content') != item['content']
             existing['content'] = item['content']
-            for field in OPTIONAL_FIELDS:
+            for field in OPTIONAL_FIELDS | OPTIONAL_OBJECT_FIELDS:
                 if field in item:
                     changed = changed or existing.get(field) != item[field]
                     existing[field] = item[field]

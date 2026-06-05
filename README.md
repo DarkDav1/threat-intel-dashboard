@@ -9,6 +9,7 @@ The project collects daily signals from trusted vulnerability and security resea
 - Research Watch
 - Defender Action Queue
 - Pipeline Health
+- Source Coverage diagnostics
 
 ## Data Sources
 
@@ -103,5 +104,6 @@ bash scripts/discoveries_pipeline.sh
 - The merge step accepts only the three allowed intelligence kinds.
 - Structured CVE and research metadata is allowed only through fixed `items` and `sources` fields.
 - Defender actions are generated as a constrained queue with priority, category, owner, due window, and related CVEs or sources.
+- Collection diagnostics record source success/failure and item counts for KEV, NVD, EPSS, and each research feed.
 - RSS research entries are filtered by security keywords to avoid conference, interview, or general technology content.
 - Existing entries with the same date and title are updated instead of duplicated.

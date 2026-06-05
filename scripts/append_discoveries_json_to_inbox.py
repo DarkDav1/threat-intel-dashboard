@@ -11,6 +11,7 @@ ALLOWED_KINDS = {
     'threat_intel', 'cve_radar', 'defender_actions'
 }
 OPTIONAL_FIELDS = {'items', 'sources'}
+OPTIONAL_OBJECT_FIELDS = {'collection'}
 
 
 def load_array(path: Path):
@@ -59,6 +60,10 @@ def main():
         for field in OPTIONAL_FIELDS:
             value = item.get(field)
             if isinstance(value, list):
+                normalized[field] = value
+        for field in OPTIONAL_OBJECT_FIELDS:
+            value = item.get(field)
+            if isinstance(value, dict):
                 normalized[field] = value
         inbox.append(normalized)
         seen.add(key)

@@ -32,6 +32,8 @@ RSS_SOURCES = [
     ('Huntress', 'https://www.huntress.com/blog/rss.xml'),
 ]
 
+COLLECTION_EVENTS = []
+
 SECURITY_RESEARCH_KEYWORDS = [
     'apt', 'backdoor', 'breach', 'campaign', 'cisa', 'credential',
     'cve', 'cyber', 'detection', 'dfir', 'exploit', 'intrusion',
@@ -53,6 +55,16 @@ def fetch(url, timeout=20):
 
 def fetch_json(url, timeout=20):
     return json.loads(fetch(url, timeout).decode('utf-8', errors='replace'))
+
+
+def record_source(name, kind, status, collected=0, error=''):
+    COLLECTION_EVENTS.append({
+        'name': name,
+        'kind': kind,
+        'status': status,
+        'collected': int(collected or 0),
+        'error': str(error)[:180],
+    })
 
 
 def today():
@@ -87,7 +99,8 @@ def get_epss(cves):
     query = urllib.parse.urlencode({'cve': ','.join(cves[:80])})
     try:
         data = fetch_json(f'{EPSS_URL}?{query}', timeout=20)
-    except Exception:
+    except Exception as exc:
+        record_source('FIRST EPSS', 'exploit_probability', 'failed', 0, exc)
         return {}
     result = {}
     for item in data.get('data', []):
@@ -98,11 +111,16 @@ def get_epss(cves):
             }
         except Exception:
             continue
+    record_source('FIRST EPSS', 'exploit_probability', 'ok', len(result))
     return result
 
 
 def get_recent_kev():
-    data = fetch_json(KEV_URL, timeout=25)
+    try:
+        data = fetch_json(KEV_URL, timeout=25)
+    except Exception as exc:
+        record_source('CISA KEV', 'vulnerability', 'failed', 0, exc)
+        return []
     cutoff = today() - timedelta(days=21)
     vulns = []
     for item in data.get('vulnerabilities', []):
@@ -126,6 +144,7 @@ def get_recent_kev():
     epss = get_epss([v['cve'] for v in vulns])
     for v in vulns:
         v.update(epss.get(v['cve'], {}))
+    record_source('CISA KEV', 'vulnerability', 'ok', len(vulns))
     return sorted(vulns, key=lambda x: (x.get('date_added', ''), x.get('epss', 0)), reverse=True)
 
 
@@ -148,7 +167,8 @@ def get_recent_nvd():
     })
     try:
         data = fetch_json(f'{NVD_URL}?{params}', timeout=25)
-    except Exception:
+    except Exception as exc:
+        record_source('NVD CVE API 2.0', 'vulnerability', 'failed', 0, exc)
         return []
     items = []
     for row in data.get('vulnerabilities', []):
@@ -171,17 +191,20 @@ def get_recent_nvd():
     epss = get_epss([v['cve'] for v in items])
     for v in items:
         v.update(epss.get(v['cve'], {}))
+    record_source('NVD CVE API 2.0', 'vulnerability', 'ok', len(items))
     return sorted(items, key=lambda x: (x.get('epss', 0), x.get('cvss') or 0), reverse=True)
 
 
 def parse_feed(source, url):
     try:
         raw = fetch(url, timeout=20)
-    except Exception:
+    except Exception as exc:
+        record_source(source, 'research_feed', 'failed', 0, exc)
         return []
     try:
         root = ET.fromstring(raw)
-    except Exception:
+    except Exception as exc:
+        record_source(source, 'research_feed', 'failed', 0, exc)
         return []
 
     items = []
@@ -193,6 +216,7 @@ def parse_feed(source, url):
             pub = parse_date(item.findtext('pubDate'))
             desc = strip_text(item.findtext('description'))
             items.append({'source': source, 'title': title, 'url': link, 'date': str(pub or today()), 'summary': desc[:220]})
+        record_source(source, 'research_feed', 'ok', len(items))
         return items
 
     ns = {'atom': 'http://www.w3.org/2005/Atom'}
@@ -203,6 +227,7 @@ def parse_feed(source, url):
         pub = parse_date(item.findtext('atom:updated', namespaces=ns) or item.findtext('atom:published', namespaces=ns))
         summary = strip_text(item.findtext('atom:summary', namespaces=ns) or item.findtext('atom:content', namespaces=ns))
         items.append({'source': source, 'title': title, 'url': link, 'date': str(pub or today()), 'summary': summary[:220]})
+    record_source(source, 'research_feed', 'ok', len(items))
     return items
 
 
@@ -222,6 +247,7 @@ def get_research_watch():
             if item_date >= cutoff and is_security_research(item):
                 items.append(item)
     items.sort(key=lambda x: x.get('date', ''), reverse=True)
+    record_source('Research Filter', 'normalization', 'ok', len(items))
     return items[:10]
 
 
@@ -355,6 +381,35 @@ def build_action_items(cve_items, research):
     return actions
 
 
+def build_collection_summary(cve_items, research, action_items):
+    aggregated = {}
+    for event in COLLECTION_EVENTS:
+        key = (event.get('name'), event.get('kind'))
+        current = aggregated.setdefault(key, {
+            'name': event.get('name'),
+            'kind': event.get('kind'),
+            'status': 'ok',
+            'collected': 0,
+            'error': '',
+        })
+        current['collected'] += int(event.get('collected') or 0)
+        if event.get('status') != 'ok':
+            current['status'] = event.get('status') or 'failed'
+            current['error'] = event.get('error') or current.get('error') or ''
+    sources = list(aggregated.values())
+    total_sources = len(sources)
+    failed_sources = [event for event in sources if event.get('status') != 'ok']
+    return {
+        'generated_at': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+        'source_count': total_sources,
+        'failed_source_count': len(failed_sources),
+        'cve_count': len(cve_items),
+        'research_count': len(research),
+        'action_count': len(action_items),
+        'sources': sources,
+    }
+
+
 def build_entries():
     date = str(today())
     kev = get_recent_kev()
@@ -363,6 +418,7 @@ def build_entries():
 
     cve_items = build_cve_items(kev, nvd)
     action_items = build_action_items(cve_items, research)
+    collection = build_collection_summary(cve_items, research, action_items)
     cve_rows = []
     for item in cve_items:
         cve_rows.append([
@@ -435,6 +491,7 @@ def build_entries():
             'content': '\n'.join(cve_content),
             'items': cve_items,
             'sources': ['CISA KEV', 'NVD CVE API 2.0', 'FIRST EPSS API'],
+            'collection': collection,
         },
         {
             'kind': 'threat_intel',
@@ -443,6 +500,7 @@ def build_entries():
             'content': '\n'.join(research_lines),
             'items': research[:8],
             'sources': [source for source, _ in RSS_SOURCES],
+            'collection': collection,
         },
         {
             'kind': 'defender_actions',
@@ -450,6 +508,7 @@ def build_entries():
             'title': f'Defender Action Checklist - {date}',
             'content': '\n'.join(action_lines),
             'items': action_items,
+            'collection': collection,
         },
     ]
 

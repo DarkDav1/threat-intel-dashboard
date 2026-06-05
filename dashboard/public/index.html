@@ -352,6 +352,12 @@
             background: rgba(52, 211, 153, 0.1);
         }
 
+        .badge.failed {
+            color: var(--red);
+            border-color: rgba(251, 113, 133, 0.32);
+            background: rgba(251, 113, 133, 0.1);
+        }
+
         .muted { color: var(--muted); }
         .mono { font-family: "JetBrains Mono", monospace; }
 
@@ -583,6 +589,8 @@
             <div class="grid" id="pipeline-stats"></div>
             <div class="section-title"><i data-lucide="circle-check-big"></i><span>Last Run</span></div>
             <div id="pipeline-run"></div>
+            <div class="section-title"><i data-lucide="satellite-dish"></i><span>Source Coverage</span></div>
+            <div id="source-coverage"></div>
             <div class="section-title"><i data-lucide="workflow"></i><span>Automation Flow</span></div>
             <div class="pipeline">
                 <div class="step"><span class="step-number">1</span><h3>Collect</h3><p>Fetch CISA KEV, NVD, FIRST EPSS, and selected professional security research feeds.</p></div>
@@ -638,6 +646,10 @@
 
     function entryItems(entry) {
         return Array.isArray(entry && entry.items) ? entry.items : [];
+    }
+
+    function entryCollection(entry) {
+        return entry && entry.collection && typeof entry.collection === 'object' ? entry.collection : null;
     }
 
     function formatPercent(value) {
@@ -732,7 +744,8 @@
 
     function badge(value) {
         const label = String(value || 'Watch');
-        const cls = label.toLowerCase() === 'critical' ? 'critical' : label.toLowerCase() === 'high' ? 'high' : label.toLowerCase() === 'ok' ? 'ok' : '';
+        const lower = label.toLowerCase();
+        const cls = lower === 'critical' ? 'critical' : lower === 'high' ? 'high' : lower === 'ok' ? 'ok' : lower === 'failed' ? 'failed' : '';
         return `<span class="badge ${cls}">${escapeHtml(label)}</span>`;
     }
 
@@ -820,6 +833,34 @@
         `;
     }
 
+    function renderSourceCoverage(collection) {
+        if (!collection || !Array.isArray(collection.sources) || !collection.sources.length) {
+            return '<div class="empty">No source coverage data is available for the latest run yet.</div>';
+        }
+        const rows = collection.sources.map(source => `
+            <tr>
+                <td>${badge(source.status === 'ok' ? 'OK' : 'Failed')}</td>
+                <td><strong>${escapeHtml(source.name || 'Unknown source')}</strong><div class="muted">${escapeHtml(source.kind || 'source')}</div></td>
+                <td>${escapeHtml(source.collected ?? 0)}</td>
+                <td>${escapeHtml(source.error || 'No error recorded')}</td>
+            </tr>
+        `).join('');
+        return `
+            <div class="grid">
+                ${statCard('Sources checked', collection.source_count ?? collection.sources.length)}
+                ${statCard('Failed sources', collection.failed_source_count ?? collection.sources.filter(s => s.status !== 'ok').length)}
+                ${statCard('CVE items', collection.cve_count ?? '--')}
+                ${statCard('Research items', collection.research_count ?? '--')}
+            </div>
+            <div class="table-wrap run-card">
+                <table class="cve-table">
+                    <thead><tr><th>Status</th><th>Source</th><th>Collected</th><th>Error</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+        `;
+    }
+
     function renderResourceHealth(data) {
         const warnings = [];
         const critical = [];
@@ -846,7 +887,7 @@
         setText('telemetry-time', `Last update ${formatDateTime(new Date().toISOString())}`);
     }
 
-    function renderPipeline(latestDate) {
+    function renderPipeline(latestDate, collection) {
         const pipeline = state.pipeline || {};
         const merge = pipeline.merge || {};
         const append = pipeline.append || {};
@@ -855,7 +896,7 @@
             statCard('Status', status.toUpperCase()),
             statCard('Last finished', formatDateTime(pipeline.finished_at)),
             statCard('Generated items', pipeline.generated_items ?? '--'),
-            statCard('Last data date', latestDate),
+            statCard('Failed sources', collection ? collection.failed_source_count : '--'),
         ].join('');
 
         const rejected = Array.isArray(merge.rejected) ? merge.rejected.length : 0;
@@ -871,6 +912,7 @@
                 <div class="stat-sub">${escapeHtml(pipeline.message || 'No pipeline message recorded.')}</div>
             </div>
         `;
+        document.getElementById('source-coverage').innerHTML = renderSourceCoverage(collection);
     }
 
     function renderIntel() {
@@ -881,6 +923,7 @@
         const latestDate = all.map(e => e.date).sort().reverse()[0] || 'No data';
         const cveItems = entryItems(cve);
         const actionItems = entryItems(actions);
+        const collection = entryCollection(cve) || entryCollection(research) || entryCollection(actions);
         const criticalCount = cveItems.filter(item => item.priority === 'Critical').length;
         const highCount = cveItems.filter(item => item.priority === 'High').length;
         const cveCount = cveItems.length || countCves(cve && cve.content);
@@ -912,7 +955,7 @@
         ].join('');
         document.getElementById('actions-table-view').innerHTML = renderActionQueue(actions);
         document.getElementById('actions-view').innerHTML = article(actions, 'Defender Actions');
-        renderPipeline(latestDate);
+        renderPipeline(latestDate, collection);
         try { lucide.createIcons(); } catch (e) {}
     }
 
