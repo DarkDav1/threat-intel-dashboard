@@ -61,6 +61,59 @@ EXPLOIT_KEYWORDS = ['remote code execution', 'execute arbitrary code', 'rce', 'c
 AUTH_BYPASS_KEYWORDS = ['authentication bypass', 'auth bypass', 'privilege escalation', 'elevation of privilege']
 PUBLIC_EXPOSURE_KEYWORDS = ['internet-facing', 'remote attacker', 'network', 'crafted request', 'web request']
 
+DETECTION_BASELINES = {
+    'Windows': {
+        'log_sources': ['Windows Event Log', 'EDR process telemetry', 'PowerShell logs', 'Network connections'],
+        'hunt_ideas': ['Look for service crashes followed by unexpected child processes', 'Review suspicious network service activity and outbound connections'],
+        'mitre': ['T1059 Command and Scripting Interpreter', 'T1203 Exploitation for Client Execution'],
+    },
+    'Network Edge': {
+        'log_sources': ['VPN logs', 'Firewall traffic logs', 'Reverse proxy logs', 'Authentication logs'],
+        'hunt_ideas': ['Review unusual admin logins from new geographies', 'Search for exploit-like HTTP requests and config changes'],
+        'mitre': ['T1190 Exploit Public-Facing Application', 'T1133 External Remote Services'],
+    },
+    'Identity': {
+        'log_sources': ['Identity provider sign-in logs', 'Directory audit logs', 'MFA events', 'EDR authentication telemetry'],
+        'hunt_ideas': ['Review impossible travel, MFA fatigue, and new privileged role assignments', 'Search for abnormal LDAP, SAML, or OAuth activity'],
+        'mitre': ['T1078 Valid Accounts', 'T1556 Modify Authentication Process'],
+    },
+    'Linux / Unix': {
+        'log_sources': ['syslog', 'auth.log', 'auditd', 'EDR process telemetry'],
+        'hunt_ideas': ['Look for shell execution by service users', 'Review new cron jobs, SSH keys, and unusual outbound traffic'],
+        'mitre': ['T1059 Command and Scripting Interpreter', 'T1068 Exploitation for Privilege Escalation'],
+    },
+    'Cloud / Container': {
+        'log_sources': ['Cloud audit logs', 'Kubernetes audit logs', 'Container runtime logs', 'CI/CD logs'],
+        'hunt_ideas': ['Review new service accounts, secrets access, and privileged containers', 'Search for unexpected image pulls or workload changes'],
+        'mitre': ['T1611 Escape to Host', 'T1525 Implant Internal Image'],
+    },
+    'Developer Tooling': {
+        'log_sources': ['CI/CD job logs', 'Git audit logs', 'Package registry logs', 'Build artifact records'],
+        'hunt_ideas': ['Review new pipeline secrets, package publish events, and unexpected dependency changes', 'Search for suspicious build scripts or post-install commands'],
+        'mitre': ['T1195 Supply Chain Compromise', 'T1552 Unsecured Credentials'],
+    },
+    'Application Server': {
+        'log_sources': ['Web access logs', 'Application logs', 'WAF logs', 'EDR process telemetry'],
+        'hunt_ideas': ['Search for exploit payloads in HTTP parameters and unusual server child processes', 'Review webshell indicators and outbound callbacks'],
+        'mitre': ['T1190 Exploit Public-Facing Application', 'T1505 Server Software Component'],
+    },
+    'Database': {
+        'log_sources': ['Database audit logs', 'Authentication logs', 'Network flow logs', 'EDR process telemetry'],
+        'hunt_ideas': ['Review failed logins, new admin users, and bulk export activity', 'Search for database processes spawning shells or network tools'],
+        'mitre': ['T1005 Data from Local System', 'T1041 Exfiltration Over C2 Channel'],
+    },
+    'Browser / Endpoint': {
+        'log_sources': ['EDR process telemetry', 'Browser crash logs', 'Proxy logs', 'DNS logs'],
+        'hunt_ideas': ['Look for browser processes spawning script interpreters or archive tools', 'Review downloads followed by suspicious process trees'],
+        'mitre': ['T1203 Exploitation for Client Execution', 'T1059 Command and Scripting Interpreter'],
+    },
+    'General Software': {
+        'log_sources': ['Application logs', 'EDR process telemetry', 'Network flow logs'],
+        'hunt_ideas': ['Review abnormal process starts, crashes, and outbound connections around exposed services'],
+        'mitre': ['T1190 Exploit Public-Facing Application'],
+    },
+}
+
 RESEARCH_CATEGORY_RULES = [
     ('Active Exploitation', ['active exploitation', 'exploited in the wild', 'zero-day', 'kev', 'intrusion', 'campaign']),
     ('Malware / Ransomware', ['malware', 'ransomware', 'backdoor', 'loader', 'botnet', 'trojan']),
@@ -472,6 +525,36 @@ def calculate_risk(item, is_kev):
     return min(score, 100), factors or ['Review required']
 
 
+def detection_guidance(item):
+    area = item.get('impact_area') or 'General Software'
+    base = DETECTION_BASELINES.get(area, DETECTION_BASELINES['General Software'])
+    summary = strip_text(item.get('summary') or '').lower()
+    hints = {
+        'log_sources': list(base['log_sources']),
+        'hunt_ideas': list(base['hunt_ideas']),
+        'mitre': list(base['mitre']),
+    }
+    if any(term in summary for term in EXPLOIT_KEYWORDS):
+        hints['hunt_ideas'].append('Prioritize process trees that begin immediately after exploit-facing service activity')
+        hints['mitre'].append('T1059 Command and Scripting Interpreter')
+    if any(term in summary for term in AUTH_BYPASS_KEYWORDS):
+        hints['log_sources'].append('Privilege and role-change audit logs')
+        hints['hunt_ideas'].append('Review new privileged sessions, token use, and account changes after suspicious access')
+        hints['mitre'].append('T1068 Exploitation for Privilege Escalation')
+    if any(term in summary for term in PUBLIC_EXPOSURE_KEYWORDS) or item.get('kev'):
+        hints['log_sources'].append('Internet-facing service logs')
+        hints['hunt_ideas'].append('Search perimeter logs for repeated exploit attempts against affected products')
+        hints['mitre'].append('T1190 Exploit Public-Facing Application')
+
+    for key in hints:
+        seen = []
+        for value in hints[key]:
+            if value not in seen:
+                seen.append(value)
+        hints[key] = seen[:5]
+    return hints
+
+
 def normalize_cve_item(item, source, watchlist):
     is_kev = source == 'CISA KEV'
     vendor = item.get('vendor', '')
@@ -499,6 +582,7 @@ def normalize_cve_item(item, source, watchlist):
         'risk_factors': risk_factors,
     }
     normalized['impact_area'] = infer_impact_area({**item, **normalized})
+    normalized['detection'] = detection_guidance(normalized)
     matches = match_watchlist({**item, **normalized}, watchlist)
     normalized['watchlist_matches'] = matches
     normalized['relevance_score'] = relevance_score(matches)
@@ -597,11 +681,16 @@ def build_action_items(cve_items, research, watchlist):
         })
 
     if cve_items:
+        top_log_sources = []
+        for item in cve_items[:8]:
+            for source in (item.get('detection') or {}).get('log_sources') or []:
+                if source not in top_log_sources:
+                    top_log_sources.append(source)
         actions.append({
             'priority': 'High' if critical else 'Watch',
             'category': 'Detection',
             'task': 'Add hunts for products listed in CVE Radar',
-            'reason': 'Exploit attempts often appear as abnormal sign-ins, web requests, process creation, or outbound connections before patching is complete.',
+            'reason': 'Exploit attempts often appear before patching is complete. Prioritize telemetry from: ' + ', '.join(top_log_sources[:5]) + '.',
             'owner': 'Detection Engineering',
             'due': 'Next review',
             'related': [item.get('cve') for item in cve_items[:6]],
@@ -714,6 +803,7 @@ def build_entries():
         '- Check internet-facing assets, VPNs, firewalls, identity systems, and common open-source components against the CVE table.',
         '- Treat KEV matches as urgent remediation items; CVSS-only findings without exploitation signals can stay in the standard patch queue.',
         '- For affected products, add log hunts for abnormal sign-ins, web exploit traces, suspicious process creation, and unusual outbound connections.',
+        '- Use the detection guidance fields to map high-risk CVEs to log sources, hunt ideas, and ATT&CK techniques.',
         '',
         '## Sources',
         '- CISA Known Exploited Vulnerabilities Catalog',

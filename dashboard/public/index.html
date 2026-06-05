@@ -623,6 +623,7 @@
             <button class="active" data-page="resources"><i data-lucide="activity"></i><span>Resources</span></button>
             <button data-page="overview"><i data-lucide="layout-dashboard"></i><span>Intel Overview</span></button>
             <button data-page="cve"><i data-lucide="shield-alert"></i><span>CVE Radar</span></button>
+            <button data-page="detection"><i data-lucide="radar"></i><span>Detection</span></button>
             <button data-page="research"><i data-lucide="rss"></i><span>Research Watch</span></button>
             <button data-page="actions"><i data-lucide="list-checks"></i><span>Defender Actions</span></button>
             <button data-page="briefing"><i data-lucide="newspaper"></i><span>Briefing</span></button>
@@ -728,6 +729,11 @@
             <div class="section-title"><i data-lucide="file-text"></i><span>Assessment Notes</span></div>
             <div id="cve-view"></div>
         </section>
+        <section id="page-detection" class="page">
+            <div id="detection-summary-grid" class="grid"></div>
+            <div class="section-title"><i data-lucide="radar"></i><span>Detection Coverage</span></div>
+            <div id="detection-table-view"></div>
+        </section>
         <section id="page-research" class="page">
             <div id="research-summary-grid" class="grid"></div>
             <div class="section-title"><i data-lucide="rss"></i><span>Research Items</span></div>
@@ -781,6 +787,7 @@
         resources: ['Resource Monitor', 'Read-only system telemetry for the homelab node running the intelligence pipeline.'],
         overview: ['Threat Intelligence Overview', 'Daily operational intelligence from vulnerability, exploitation, and professional research sources.'],
         cve: ['CVE Radar', 'Prioritized vulnerability signals using KEV, CVSS, and EPSS context.'],
+        detection: ['Detection Coverage', 'Deterministic log-source and hunt guidance mapped from prioritized CVE signals.'],
         research: ['Research Watch', 'Recent posts from professional security research teams.'],
         actions: ['Defender Actions', 'Operational Checklist generated from the daily intelligence set.'],
         briefing: ['Daily Briefing', 'Export-ready Markdown summary generated after the intelligence pipeline merges validated data.'],
@@ -1057,6 +1064,34 @@
         `;
     }
 
+    function renderDetectionTable(cveItems) {
+        const items = cveItems.filter(item => item.detection && (item.priority === 'Critical' || item.priority === 'High' || Number(item.relevance_score) > 0));
+        if (!items.length) {
+            return '<div class="empty">No detection guidance is available yet.</div>';
+        }
+        const rows = items.slice(0, 12).map(item => {
+            const detection = item.detection || {};
+            return `
+                <tr>
+                    <td class="mono">${escapeHtml(item.cve || '--')}</td>
+                    <td>${badge(item.priority)}</td>
+                    <td>${escapeHtml(item.impact_area || 'General Software')}</td>
+                    <td>${(detection.log_sources || []).map(value => `<div class="factor">${escapeHtml(value)}</div>`).join('')}</td>
+                    <td>${(detection.hunt_ideas || []).map(value => `<div class="muted">${escapeHtml(value)}</div>`).join('')}</td>
+                    <td>${(detection.mitre || []).map(value => `<div class="mono muted">${escapeHtml(value)}</div>`).join('')}</td>
+                </tr>
+            `;
+        }).join('');
+        return `
+            <div class="table-wrap">
+                <table class="cve-table">
+                    <thead><tr><th>CVE</th><th>Priority</th><th>Impact Area</th><th>Log Sources</th><th>Hunt Ideas</th><th>MITRE ATT&CK</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+        `;
+    }
+
     function renderActionQueue(entry) {
         const items = entryItems(entry);
         if (!items.length) {
@@ -1238,6 +1273,9 @@
         const topRisk = cveItems.reduce((max, item) => Math.max(max, Number(item.risk_score) || 0), 0);
         const impactAreas = new Set(cveItems.map(item => item.impact_area).filter(Boolean));
         const researchCategories = new Set(researchItems.map(item => item.category).filter(Boolean));
+        const detectionItems = cveItems.filter(item => item.detection);
+        const logSources = new Set(detectionItems.flatMap(item => (item.detection && item.detection.log_sources) || []));
+        const mitreTechniques = new Set(detectionItems.flatMap(item => (item.detection && item.detection.mitre) || []));
 
         setText('overview-grid', '');
         document.getElementById('overview-grid').innerHTML = [
@@ -1261,6 +1299,13 @@
         ].join('');
         document.getElementById('cve-table-view').innerHTML = renderCveTable(cve);
         document.getElementById('cve-view').innerHTML = article(cve, 'CVE Radar');
+        document.getElementById('detection-summary-grid').innerHTML = [
+            statCard('Mapped CVEs', detectionItems.length || '--'),
+            statCard('Log sources', logSources.size || '--'),
+            statCard('ATT&CK techniques', mitreTechniques.size || '--'),
+            statCard('Critical mapped', detectionItems.filter(item => item.priority === 'Critical').length || '--'),
+        ].join('');
+        document.getElementById('detection-table-view').innerHTML = renderDetectionTable(cveItems);
         document.getElementById('research-summary-grid').innerHTML = [
             statCard('Research items', researchItems.length),
             statCard('Sources', new Set(researchItems.map(item => item.source).filter(Boolean)).size || '--'),

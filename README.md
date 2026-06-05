@@ -6,6 +6,7 @@ The project collects daily signals from trusted vulnerability and security resea
 
 - Resource Monitor
 - Structured CVE Radar
+- Detection Coverage
 - Research Watch
 - Defender Action Queue
 - Export-ready Daily Briefing
@@ -88,6 +89,10 @@ The landing page is a read-only resource monitor for the host running the pipeli
 
 The CVE Radar view supports triage filtering by search text, priority, CISA KEV status, and local watchlist relevance. It shows risk score, relevance score, impact area, and matched watchlist groups.
 
+The Detection view maps prioritized CVEs to deterministic log-source guidance,
+hunt ideas, and MITRE ATT&CK technique references. This is intended to help an
+analyst move from patch triage to detection coverage review.
+
 ## Configuration
 
 The default layout works from the repository root. These environment variables can override paths and network settings:
@@ -138,6 +143,7 @@ Generated CVE items include:
 - `watchlist_matches`
 - `impact_area`
 - `risk_factors`
+- `detection`
 
 The dashboard can filter CVEs to watchlist matches only.
 
@@ -149,6 +155,7 @@ briefing from validated dashboard data. It includes:
 - Executive summary
 - Top vulnerabilities
 - Local relevance summary
+- Detection guidance
 - Defender actions
 - Research watch
 - Source coverage
@@ -171,6 +178,7 @@ bash scripts/discoveries_pipeline.sh
 - Structured CVE and research metadata is allowed only through fixed `items` and `sources` fields.
 - Defender actions are generated as a constrained queue with priority, category, owner, due window, and related CVEs or sources.
 - The Markdown briefing is generated only after validated data is merged.
+- Detection guidance is rule-based and generated from CVE impact area, exploit signals, and local relevance.
 - Local watchlist relevance is deterministic and read from `config/watchlist.json`.
 - Collection diagnostics record source success/failure and item counts for KEV, NVD, EPSS, and each research feed.
 - RSS research entries are filtered by security keywords to avoid conference, interview, or general technology content.

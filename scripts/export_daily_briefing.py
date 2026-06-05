@@ -136,6 +136,25 @@ def build_briefing(data):
     ])
 
     lines.extend([
+        '## Detection Guidance',
+        '',
+    ])
+    detection_rows = []
+    for item in top_cves[:8]:
+        detection = item.get('detection') or {}
+        detection_rows.append([
+            item.get('cve'),
+            item.get('impact_area'),
+            ', '.join(detection.get('log_sources') or []),
+            '; '.join(detection.get('hunt_ideas') or []),
+            ', '.join(detection.get('mitre') or []),
+        ])
+    lines.extend([
+        table(['CVE', 'Impact Area', 'Log Sources', 'Hunt Ideas', 'MITRE ATT&CK'], detection_rows) if detection_rows else 'No detection guidance was generated.',
+        '',
+    ])
+
+    lines.extend([
         '## Defender Actions',
         '',
     ])
