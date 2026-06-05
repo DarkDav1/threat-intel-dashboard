@@ -840,7 +840,11 @@
         const rows = collection.sources.map(source => `
             <tr>
                 <td>${badge(source.status === 'ok' ? 'OK' : 'Failed')}</td>
-                <td><strong>${escapeHtml(source.name || 'Unknown source')}</strong><div class="muted">${escapeHtml(source.kind || 'source')}</div></td>
+                <td>
+                    <strong>${escapeHtml(source.name || 'Unknown source')}</strong>
+                    <div class="muted">${escapeHtml(source.kind || 'source')}</div>
+                    <div class="muted mono">${source.url ? `<a href="${escapeHtml(source.url)}" target="_blank" rel="noreferrer">${escapeHtml(source.url)}</a>` : 'No source URL recorded'}</div>
+                </td>
                 <td>${escapeHtml(source.collected ?? 0)}</td>
                 <td>${escapeHtml(source.error || 'No error recorded')}</td>
             </tr>

@@ -25,7 +25,10 @@ RSS_SOURCES = [
     ('Palo Alto Unit 42', 'https://unit42.paloaltonetworks.com/feed/'),
     ('Cisco Talos', 'https://blog.talosintelligence.com/rss/'),
     ('The DFIR Report', 'https://thedfirreport.com/feed/'),
-    ('Mandiant', 'https://cloud.google.com/blog/topics/threat-intelligence/rss/'),
+    ('Mandiant', [
+        'https://www.mandiant.com/resources/blog/rss.xml',
+        'https://cloud.google.com/blog/topics/threat-intelligence/rss/',
+    ]),
     ('CrowdStrike', 'https://www.crowdstrike.com/en-us/blog/feed/'),
     ('Elastic Security', 'https://www.elastic.co/security-labs/rss/feed.xml'),
     ('Rapid7', 'https://www.rapid7.com/blog/rss/'),
@@ -57,13 +60,14 @@ def fetch_json(url, timeout=20):
     return json.loads(fetch(url, timeout).decode('utf-8', errors='replace'))
 
 
-def record_source(name, kind, status, collected=0, error=''):
+def record_source(name, kind, status, collected=0, error='', url=''):
     COLLECTION_EVENTS.append({
         'name': name,
         'kind': kind,
         'status': status,
         'collected': int(collected or 0),
         'error': str(error)[:180],
+        'url': str(url)[:240],
     })
 
 
@@ -100,7 +104,7 @@ def get_epss(cves):
     try:
         data = fetch_json(f'{EPSS_URL}?{query}', timeout=20)
     except Exception as exc:
-        record_source('FIRST EPSS', 'exploit_probability', 'failed', 0, exc)
+        record_source('FIRST EPSS', 'exploit_probability', 'failed', 0, exc, EPSS_URL)
         return {}
     result = {}
     for item in data.get('data', []):
@@ -111,7 +115,7 @@ def get_epss(cves):
             }
         except Exception:
             continue
-    record_source('FIRST EPSS', 'exploit_probability', 'ok', len(result))
+    record_source('FIRST EPSS', 'exploit_probability', 'ok', len(result), url=EPSS_URL)
     return result
 
 
@@ -119,7 +123,7 @@ def get_recent_kev():
     try:
         data = fetch_json(KEV_URL, timeout=25)
     except Exception as exc:
-        record_source('CISA KEV', 'vulnerability', 'failed', 0, exc)
+        record_source('CISA KEV', 'vulnerability', 'failed', 0, exc, KEV_URL)
         return []
     cutoff = today() - timedelta(days=21)
     vulns = []
@@ -144,7 +148,7 @@ def get_recent_kev():
     epss = get_epss([v['cve'] for v in vulns])
     for v in vulns:
         v.update(epss.get(v['cve'], {}))
-    record_source('CISA KEV', 'vulnerability', 'ok', len(vulns))
+    record_source('CISA KEV', 'vulnerability', 'ok', len(vulns), url=KEV_URL)
     return sorted(vulns, key=lambda x: (x.get('date_added', ''), x.get('epss', 0)), reverse=True)
 
 
@@ -168,7 +172,7 @@ def get_recent_nvd():
     try:
         data = fetch_json(f'{NVD_URL}?{params}', timeout=25)
     except Exception as exc:
-        record_source('NVD CVE API 2.0', 'vulnerability', 'failed', 0, exc)
+        record_source('NVD CVE API 2.0', 'vulnerability', 'failed', 0, exc, NVD_URL)
         return []
     items = []
     for row in data.get('vulnerabilities', []):
@@ -191,21 +195,23 @@ def get_recent_nvd():
     epss = get_epss([v['cve'] for v in items])
     for v in items:
         v.update(epss.get(v['cve'], {}))
-    record_source('NVD CVE API 2.0', 'vulnerability', 'ok', len(items))
+    record_source('NVD CVE API 2.0', 'vulnerability', 'ok', len(items), url=NVD_URL)
     return sorted(items, key=lambda x: (x.get('epss', 0), x.get('cvss') or 0), reverse=True)
 
 
-def parse_feed(source, url):
+def source_urls(urls):
+    return urls if isinstance(urls, list) else [urls]
+
+
+def parse_feed_bytes(source, url):
     try:
         raw = fetch(url, timeout=20)
     except Exception as exc:
-        record_source(source, 'research_feed', 'failed', 0, exc)
-        return []
+        return None, exc
     try:
         root = ET.fromstring(raw)
     except Exception as exc:
-        record_source(source, 'research_feed', 'failed', 0, exc)
-        return []
+        return None, exc
 
     items = []
     channel_items = root.findall('.//item')
@@ -216,8 +222,7 @@ def parse_feed(source, url):
             pub = parse_date(item.findtext('pubDate'))
             desc = strip_text(item.findtext('description'))
             items.append({'source': source, 'title': title, 'url': link, 'date': str(pub or today()), 'summary': desc[:220]})
-        record_source(source, 'research_feed', 'ok', len(items))
-        return items
+        return items, None
 
     ns = {'atom': 'http://www.w3.org/2005/Atom'}
     for item in root.findall('.//atom:entry', ns)[:12]:
@@ -227,8 +232,19 @@ def parse_feed(source, url):
         pub = parse_date(item.findtext('atom:updated', namespaces=ns) or item.findtext('atom:published', namespaces=ns))
         summary = strip_text(item.findtext('atom:summary', namespaces=ns) or item.findtext('atom:content', namespaces=ns))
         items.append({'source': source, 'title': title, 'url': link, 'date': str(pub or today()), 'summary': summary[:220]})
-    record_source(source, 'research_feed', 'ok', len(items))
-    return items
+    return items, None
+
+
+def parse_feed(source, urls):
+    errors = []
+    for url in source_urls(urls):
+        items, error = parse_feed_bytes(source, url)
+        if error is None:
+            record_source(source, 'research_feed', 'ok', len(items), url=url)
+            return items
+        errors.append(f'{url}: {error}')
+    record_source(source, 'research_feed', 'failed', 0, '; '.join(errors), source_urls(urls)[0])
+    return []
 
 
 def is_security_research(item):
@@ -391,8 +407,11 @@ def build_collection_summary(cve_items, research, action_items):
             'status': 'ok',
             'collected': 0,
             'error': '',
+            'url': '',
         })
         current['collected'] += int(event.get('collected') or 0)
+        if event.get('url') and not current.get('url'):
+            current['url'] = event.get('url')
         if event.get('status') != 'ok':
             current['status'] = event.get('status') or 'failed'
             current['error'] = event.get('error') or current.get('error') or ''
