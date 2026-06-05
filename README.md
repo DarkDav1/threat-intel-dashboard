@@ -4,6 +4,7 @@ An automated threat intelligence dashboard for a small homelab or security opera
 
 The project collects daily signals from trusted vulnerability and security research sources, normalizes them into a constrained JSON format, and renders a focused web dashboard with:
 
+- Resource Monitor
 - CVE Radar
 - Research Watch
 - Defender Actions
@@ -34,7 +35,7 @@ This keeps the UI focused on operationally useful threat intelligence instead of
 ```text
 dashboard/
   public/index.html          Web dashboard
-  server.js                  Small Node.js static/API server
+  server.js                  Small Node.js static/API server with read-only resource telemetry
 
 scripts/
   generate_threat_intel.py   Fetches and formats daily intelligence
@@ -63,6 +64,8 @@ Open:
 ```text
 http://localhost:8765
 ```
+
+The landing page is a read-only resource monitor for the host running the pipeline. Threat intelligence views are available in the navigation.
 
 ## Configuration
 

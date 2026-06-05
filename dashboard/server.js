@@ -2,6 +2,10 @@ const http = require('http');
 const fs = require('fs/promises');
 const path = require('path');
 const os = require('os');
+const { exec } = require('child_process');
+const util = require('util');
+
+const execAsync = util.promisify(exec);
 
 const PORT = Number(process.env.COCKY_DASHBOARD_PORT || 8765);
 const HOST = process.env.COCKY_DASHBOARD_HOST || '0.0.0.0';
@@ -45,14 +49,139 @@ async function readDiscoveries() {
     }
 }
 
+async function getDiskUsage() {
+    const disk = { total: 0, used: 0, free: 0, percent: 0 };
+    try {
+        const { stdout } = await execAsync('df -k / | tail -n 1', { timeout: 5000 });
+        const parts = stdout.trim().split(/\s+/);
+        if (parts.length >= 6) {
+            disk.total = Number(parts[1]) * 1024;
+            disk.used = Number(parts[2]) * 1024;
+            disk.free = Number(parts[3]) * 1024;
+            disk.percent = Number(parts[4].replace('%', ''));
+        }
+    } catch (error) {}
+    return disk;
+}
+
+async function getBattery() {
+    const battery = { percent: null, charging: false, status: 'Unavailable', watts: null };
+    try {
+        const capacity = await fs.readFile('/sys/class/power_supply/BAT0/capacity', 'utf-8');
+        const status = await fs.readFile('/sys/class/power_supply/BAT0/status', 'utf-8');
+        battery.percent = Number(capacity.trim());
+        battery.status = status.trim();
+        battery.charging = battery.status === 'Charging';
+        try {
+            const powerMicro = await fs.readFile('/sys/class/power_supply/BAT0/power_now', 'utf-8');
+            battery.watts = Number(powerMicro.trim()) / 1000000;
+        } catch (error) {}
+    } catch (error) {}
+    return battery;
+}
+
+async function getTemperature() {
+    const temperature = { cpu: null, ssd: null };
+    try {
+        const { stdout } = await execAsync('sensors 2>/dev/null', { timeout: 5000 });
+        const tctlMatch = stdout.match(/Tctl:\s*\+([\d.]+)°C/);
+        const nvmeMatch = stdout.match(/Composite:\s*\+([\d.]+)°C/);
+        if (tctlMatch) temperature.cpu = Number(tctlMatch[1]);
+        if (nvmeMatch) temperature.ssd = Number(nvmeMatch[1]);
+    } catch (error) {}
+    if (temperature.cpu === null) {
+        try {
+            const raw = await fs.readFile('/sys/class/thermal/thermal_zone1/temp', 'utf-8');
+            temperature.cpu = Number(raw.trim()) / 1000;
+        } catch (error) {}
+    }
+    return temperature;
+}
+
+async function getNetworkCounters() {
+    const counters = { rx: 0, tx: 0 };
+    try {
+        const netDev = await fs.readFile('/proc/net/dev', 'utf-8');
+        for (const line of netDev.split('\n')) {
+            if (!line.includes(':') || line.includes('lo:')) continue;
+            const parts = line.trim().split(/\s+/);
+            counters.rx += Number(parts[1]) || 0;
+            counters.tx += Number(parts[9]) || 0;
+        }
+    } catch (error) {}
+    return counters;
+}
+
+async function getTopProcesses() {
+    try {
+        const { stdout } = await execAsync('ps -eo pid,comm,%cpu,%mem --sort=-%cpu | head -n 7', { timeout: 5000 });
+        return stdout.trim().split('\n').slice(1).map(line => {
+            const match = line.trim().match(/^(\d+)\s+(.+?)\s+([0-9.]+)\s+([0-9.]+)$/);
+            if (!match) return null;
+            return {
+                pid: match[1],
+                name: match[2],
+                cpu: Number(match[3]),
+                mem: Number(match[4]),
+            };
+        }).filter(Boolean);
+    } catch (error) {
+        return [];
+    }
+}
+
+async function getSystemInfo() {
+    const cpus = os.cpus();
+    const load = os.loadavg()[0] || 0;
+    const memTotal = os.totalmem();
+    const memFree = os.freemem();
+    const memUsed = memTotal - memFree;
+
+    const [disk, battery, temperature, netStat, topProcesses, discoveries] = await Promise.all([
+        getDiskUsage(),
+        getBattery(),
+        getTemperature(),
+        getNetworkCounters(),
+        getTopProcesses(),
+        readDiscoveries(),
+    ]);
+
+    return {
+        ok: true,
+        hostname: os.hostname(),
+        platform: os.platform(),
+        uptime: os.uptime(),
+        cpu: {
+            model: cpus[0] ? cpus[0].model : 'Unknown CPU',
+            cores: cpus.length,
+            load: load.toFixed(2),
+            usage: Math.min(100, (load / Math.max(cpus.length, 1)) * 100).toFixed(1),
+        },
+        memory: {
+            total: memTotal,
+            free: memFree,
+            used: memUsed,
+            percent: ((memUsed / memTotal) * 100).toFixed(1),
+        },
+        disk,
+        battery,
+        temperature,
+        netStat,
+        topProcesses,
+        sections: Object.fromEntries(
+            Object.entries(discoveries).map(([kind, value]) => [kind, Array.isArray(value.entries) ? value.entries.length : 0])
+        ),
+    };
+}
+
 async function getHealth() {
-    const data = await readDiscoveries();
+    const discoveries = await readDiscoveries();
     return {
         ok: true,
         hostname: os.hostname(),
         uptimeSeconds: Math.round(os.uptime()),
         sections: Object.fromEntries(
-            Object.entries(data).map(([kind, value]) => [kind, Array.isArray(value.entries) ? value.entries.length : 0])
+            Object.entries(discoveries).map(([kind, value]) => [kind, Array.isArray(value.entries) ? value.entries.length : 0])
         ),
     };
 }
@@ -83,7 +212,12 @@ const server = http.createServer(async (req, res) => {
             return;
         }
 
-        if (normalizedUrl === '/api/health' || normalizedUrl === '/api/system') {
+        if (normalizedUrl === '/api/system') {
+            sendJson(res, 200, await getSystemInfo());
+            return;
+        }
+
+        if (normalizedUrl === '/api/health') {
             sendJson(res, 200, await getHealth());
             return;
         }

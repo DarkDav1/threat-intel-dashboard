@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Threat Intelligence Dashboard</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23090a0f'/%3E%3Cpath d='M16 5l9 4v6c0 6-4 10-9 12-5-2-9-6-9-12V9l9-4z' fill='none' stroke='%2338bdf8' stroke-width='2.3'/%3E%3Cpath d='M11 16l3 3 7-7' fill='none' stroke='%2334d399' stroke-width='2.3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -49,6 +50,7 @@
             position: sticky;
             top: 0;
             height: 100vh;
+            min-width: 0;
         }
 
         .brand {
@@ -85,6 +87,7 @@
             display: flex;
             flex-direction: column;
             gap: 8px;
+            min-width: 0;
         }
 
         .nav button {
@@ -160,6 +163,17 @@
             gap: 14px;
         }
 
+        .resource-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 14px;
+        }
+
+        .resource-grid.wide {
+            grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.8fr);
+            margin-top: 14px;
+        }
+
         .card,
         .article,
         .step {
@@ -167,6 +181,8 @@
             border: 1px solid var(--border);
             border-radius: var(--radius);
             padding: 18px;
+            min-width: 0;
+            overflow: hidden;
         }
 
         .stat-label {
@@ -184,6 +200,28 @@
             overflow-wrap: anywhere;
         }
 
+        .stat-sub {
+            margin-top: 8px;
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.45;
+        }
+
+        .meter {
+            height: 6px;
+            background: rgba(148, 163, 184, 0.14);
+            border-radius: 999px;
+            overflow: hidden;
+            margin-top: 14px;
+        }
+
+        .meter-fill {
+            width: 0;
+            height: 100%;
+            background: linear-gradient(90deg, var(--blue), var(--green));
+            transition: width 0.4s ease;
+        }
+
         .section-title {
             display: flex;
             align-items: center;
@@ -195,7 +233,6 @@
 
         .article {
             margin-bottom: 16px;
-            min-width: 0;
         }
 
         .article-meta {
@@ -239,7 +276,8 @@
         .markdown a:hover { text-decoration: underline; }
         .markdown strong { color: var(--text); }
 
-        .markdown table {
+        .markdown table,
+        .process-table {
             width: 100%;
             border-collapse: collapse;
             margin: 14px 0;
@@ -247,14 +285,17 @@
         }
 
         .markdown th,
-        .markdown td {
+        .markdown td,
+        .process-table th,
+        .process-table td {
             padding: 10px 8px;
             text-align: left;
             border-bottom: 1px solid rgba(148, 163, 184, 0.16);
             vertical-align: top;
         }
 
-        .markdown th {
+        .markdown th,
+        .process-table th {
             color: var(--text);
             text-transform: uppercase;
             font-size: 11px;
@@ -299,6 +340,11 @@
             background: rgba(255, 255, 255, 0.03);
         }
 
+        @media (max-width: 1120px) {
+            .resource-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .resource-grid.wide { grid-template-columns: 1fr; }
+        }
+
         @media (max-width: 820px) {
             .layout { grid-template-columns: 1fr; }
             .sidebar {
@@ -306,11 +352,27 @@
                 position: static;
                 border-right: 0;
                 border-bottom: 1px solid var(--border);
+                max-width: 100vw;
+                overflow: hidden;
             }
-            .nav { flex-direction: row; overflow-x: auto; }
-            .nav button { white-space: nowrap; }
+            .nav {
+                flex-direction: row;
+                overflow-x: auto;
+                max-width: 100%;
+                scrollbar-width: none;
+            }
+            .nav::-webkit-scrollbar { display: none; }
+            .nav button {
+                flex: 0 0 auto;
+                white-space: nowrap;
+            }
             .main { padding: 24px 18px 34px; }
             .topbar { flex-direction: column; }
+        }
+
+        @media (max-width: 560px) {
+            .resource-grid { grid-template-columns: 1fr; }
+            .title h2 { font-size: 25px; }
         }
     </style>
 </head>
@@ -321,11 +383,12 @@
             <div class="brand-mark"><i data-lucide="shield-check"></i></div>
             <div>
                 <h1>Threat Intel Ops</h1>
-                <p>Automated CVE and research radar</p>
+                <p>Resource and intelligence dashboard</p>
             </div>
         </div>
         <nav class="nav">
-            <button class="active" data-page="overview"><i data-lucide="layout-dashboard"></i><span>Overview</span></button>
+            <button class="active" data-page="resources"><i data-lucide="activity"></i><span>Resources</span></button>
+            <button data-page="overview"><i data-lucide="layout-dashboard"></i><span>Intel Overview</span></button>
             <button data-page="cve"><i data-lucide="shield-alert"></i><span>CVE Radar</span></button>
             <button data-page="research"><i data-lucide="rss"></i><span>Research Watch</span></button>
             <button data-page="actions"><i data-lucide="list-checks"></i><span>Defender Actions</span></button>
@@ -336,38 +399,58 @@
     <main class="main">
         <div class="topbar">
             <div class="title">
-                <h2 id="page-title">Threat Intelligence Overview</h2>
-                <p id="page-subtitle">Daily operational intelligence from vulnerability, exploitation, and professional research sources.</p>
+                <h2 id="page-title">Resource Monitor</h2>
+                <p id="page-subtitle">Read-only system telemetry for the homelab node running the intelligence pipeline.</p>
             </div>
             <div class="status-pill"><i data-lucide="activity"></i><span id="status-text">Loading</span></div>
         </div>
 
-        <section id="page-overview" class="page active">
+        <section id="page-resources" class="page active">
+            <div class="resource-grid">
+                <div class="card"><span class="stat-label">CPU</span><span class="stat-value" id="cpu-value">--%</span><div class="stat-sub" id="cpu-sub">Waiting for telemetry</div><div class="meter"><div class="meter-fill" id="cpu-meter"></div></div></div>
+                <div class="card"><span class="stat-label">Memory</span><span class="stat-value" id="memory-value">--%</span><div class="stat-sub" id="memory-sub">Waiting for telemetry</div><div class="meter"><div class="meter-fill" id="memory-meter"></div></div></div>
+                <div class="card"><span class="stat-label">Disk</span><span class="stat-value" id="disk-value">--%</span><div class="stat-sub" id="disk-sub">Waiting for telemetry</div><div class="meter"><div class="meter-fill" id="disk-meter"></div></div></div>
+                <div class="card"><span class="stat-label">Temperature</span><span class="stat-value" id="temp-value">--</span><div class="stat-sub" id="temp-sub">CPU and storage sensors</div></div>
+                <div class="card"><span class="stat-label">Battery</span><span class="stat-value" id="battery-value">--</span><div class="stat-sub" id="battery-sub">Battery status unavailable</div></div>
+                <div class="card"><span class="stat-label">Network Down</span><span class="stat-value" id="rx-value">0.00 MB/s</span><div class="stat-sub">Rolling counter delta</div></div>
+                <div class="card"><span class="stat-label">Network Up</span><span class="stat-value" id="tx-value">0.00 MB/s</span><div class="stat-sub">Rolling counter delta</div></div>
+                <div class="card"><span class="stat-label">Host Uptime</span><span class="stat-value" id="uptime-value">--</span><div class="stat-sub" id="host-sub">Host telemetry</div></div>
+            </div>
+
+            <div class="resource-grid wide">
+                <div class="card">
+                    <span class="stat-label">Top Processes</span>
+                    <table class="process-table">
+                        <thead><tr><th>PID</th><th>Name</th><th>CPU</th><th>Memory</th></tr></thead>
+                        <tbody id="process-body"><tr><td colspan="4">Waiting for telemetry</td></tr></tbody>
+                    </table>
+                </div>
+                <div class="card">
+                    <span class="stat-label">Pipeline Data</span>
+                    <div class="stat-value" id="section-value">--</div>
+                    <div class="stat-sub" id="section-sub">Validated intelligence sections</div>
+                </div>
+            </div>
+        </section>
+
+        <section id="page-overview" class="page">
             <div id="overview-grid" class="grid"></div>
             <div class="section-title"><i data-lucide="target"></i><span>Current Priority</span></div>
             <div id="priority-view"></div>
         </section>
 
-        <section id="page-cve" class="page">
-            <div id="cve-view"></div>
-        </section>
-
-        <section id="page-research" class="page">
-            <div id="research-view"></div>
-        </section>
-
-        <section id="page-actions" class="page">
-            <div id="actions-view"></div>
-        </section>
+        <section id="page-cve" class="page"><div id="cve-view"></div></section>
+        <section id="page-research" class="page"><div id="research-view"></div></section>
+        <section id="page-actions" class="page"><div id="actions-view"></div></section>
 
         <section id="page-pipeline" class="page">
             <div class="grid" id="pipeline-stats"></div>
             <div class="section-title"><i data-lucide="workflow"></i><span>Automation Flow</span></div>
             <div class="pipeline">
-                <div class="step"><span class="step-number">1</span><h3>Collect</h3><p>Fetches CISA KEV, NVD, FIRST EPSS, and selected professional security research feeds.</p></div>
-                <div class="step"><span class="step-number">2</span><h3>Normalize</h3><p>Writes a constrained JSON array with only three supported content types: CVE radar, research watch, and defender actions.</p></div>
-                <div class="step"><span class="step-number">3</span><h3>Merge</h3><p>Validates allowed fields, deduplicates by kind/date/title, and merges accepted entries into the dashboard data store.</p></div>
-                <div class="step"><span class="step-number">4</span><h3>Render</h3><p>Displays only vetted threat-intelligence sections. Legacy non-security categories are intentionally excluded.</p></div>
+                <div class="step"><span class="step-number">1</span><h3>Collect</h3><p>Fetch CISA KEV, NVD, FIRST EPSS, and selected professional security research feeds.</p></div>
+                <div class="step"><span class="step-number">2</span><h3>Normalize</h3><p>Write a constrained JSON array with only three supported content types: CVE radar, research watch, and defender actions.</p></div>
+                <div class="step"><span class="step-number">3</span><h3>Merge</h3><p>Validate allowed fields, deduplicate by kind/date/title, and merge accepted entries into the dashboard data store.</p></div>
+                <div class="step"><span class="step-number">4</span><h3>Render</h3><p>Display resource telemetry and vetted threat-intelligence sections without command execution controls.</p></div>
             </div>
         </section>
     </main>
@@ -377,14 +460,15 @@
     marked.setOptions({ headerIds: false, mangle: false });
 
     const pageMeta = {
+        resources: ['Resource Monitor', 'Read-only system telemetry for the homelab node running the intelligence pipeline.'],
         overview: ['Threat Intelligence Overview', 'Daily operational intelligence from vulnerability, exploitation, and professional research sources.'],
         cve: ['CVE Radar', 'Prioritized vulnerability signals using KEV, CVSS, and EPSS context.'],
         research: ['Research Watch', 'Recent posts from professional security research teams.'],
-        actions: ['Defender Actions', 'Operational checklist generated from the daily intelligence set.'],
+        actions: ['Defender Actions', 'Operational Checklist generated from the daily intelligence set.'],
         pipeline: ['Pipeline', 'How the automation collects, validates, merges, and renders intelligence.'],
     };
 
-    const state = { data: {}, entries: {} };
+    const state = { data: {}, lastNet: null, lastNetAt: 0 };
 
     function safeMarkdown(md) {
         return DOMPurify.sanitize(marked.parse(md || ''));
@@ -414,7 +498,30 @@
         return matches ? matches.length : 0;
     }
 
-    function card(label, value) {
+    function formatBytes(bytes) {
+        if (!bytes) return '--';
+        return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} GB`;
+    }
+
+    function formatUptime(seconds) {
+        if (!Number.isFinite(seconds)) return '--';
+        const days = Math.floor(seconds / 86400);
+        const hours = Math.floor((seconds % 86400) / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        return `${days}d ${hours}h ${minutes}m`;
+    }
+
+    function setText(id, value) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = value;
+    }
+
+    function setMeter(id, value) {
+        const el = document.getElementById(id);
+        if (el) el.style.width = `${Math.max(0, Math.min(100, Number(value) || 0))}%`;
+    }
+
+    function statCard(label, value) {
         return `<div class="card"><span class="stat-label">${escapeHtml(label)}</span><span class="stat-value">${escapeHtml(value)}</span></div>`;
     }
 
@@ -429,7 +536,7 @@
         `;
     }
 
-    function render() {
+    function renderIntel() {
         const cve = latest(entriesFor('cve_radar'));
         const research = latest(entriesFor('threat_intel'));
         const actions = latest(entriesFor('defender_actions'));
@@ -438,12 +545,12 @@
         const cveCount = countCves(cve && cve.content);
         const sourceCount = countLinks(research && research.content);
 
-        document.getElementById('status-text').textContent = all.length ? 'Data loaded' : 'No data';
+        setText('overview-grid', '');
         document.getElementById('overview-grid').innerHTML = [
-            card('Latest date', latestDate),
-            card('Validated sections', all.length),
-            card('CVE signals', cveCount),
-            card('Research links', sourceCount),
+            statCard('Latest date', latestDate),
+            statCard('Validated sections', all.length),
+            statCard('CVE signals', cveCount),
+            statCard('Research links', sourceCount),
         ].join('');
 
         document.getElementById('priority-view').innerHTML = article(cve, 'CVE Radar');
@@ -451,13 +558,82 @@
         document.getElementById('research-view').innerHTML = article(research, 'Research Watch');
         document.getElementById('actions-view').innerHTML = article(actions, 'Defender Actions');
         document.getElementById('pipeline-stats').innerHTML = [
-            card('Collector', 'Python script'),
-            card('Schedule', 'OpenClaw cron'),
-            card('Allowed kinds', '3'),
-            card('Last data date', latestDate),
+            statCard('Collector', 'Python script'),
+            statCard('Schedule', 'Cron or OpenClaw'),
+            statCard('Allowed kinds', '3'),
+            statCard('Last data date', latestDate),
         ].join('');
-
         try { lucide.createIcons(); } catch (e) {}
+    }
+
+    async function loadIntel() {
+        try {
+            const response = await fetch('/api/discoveries');
+            state.data = await response.json();
+            renderIntel();
+        } catch (error) {
+            document.getElementById('priority-view').innerHTML = `<div class="empty">Failed to load intelligence data: ${escapeHtml(error.message)}</div>`;
+        }
+    }
+
+    async function loadSystem() {
+        try {
+            const response = await fetch('/api/system');
+            const data = await response.json();
+            setText('status-text', 'Online');
+            setText('cpu-value', `${data.cpu.usage}%`);
+            setText('cpu-sub', `${data.cpu.model} · ${data.cpu.cores} cores · load ${data.cpu.load}`);
+            setMeter('cpu-meter', data.cpu.usage);
+
+            setText('memory-value', `${data.memory.percent}%`);
+            setText('memory-sub', `${formatBytes(data.memory.used)} / ${formatBytes(data.memory.total)}`);
+            setMeter('memory-meter', data.memory.percent);
+
+            setText('disk-value', `${data.disk.percent || 0}%`);
+            setText('disk-sub', `${formatBytes(data.disk.used)} / ${formatBytes(data.disk.total)}`);
+            setMeter('disk-meter', data.disk.percent || 0);
+
+            const cpuTemp = data.temperature.cpu === null ? '--' : `${data.temperature.cpu.toFixed(1)}°C`;
+            const ssdTemp = data.temperature.ssd === null ? 'SSD sensor unavailable' : `SSD ${data.temperature.ssd.toFixed(1)}°C`;
+            setText('temp-value', cpuTemp);
+            setText('temp-sub', ssdTemp);
+
+            const batteryValue = data.battery.percent === null ? '--' : `${data.battery.percent}%`;
+            const batterySub = data.battery.status === 'Unavailable' ? 'Battery status unavailable' : `${data.battery.status}${data.battery.watts ? ` · ${data.battery.watts.toFixed(1)} W` : ''}`;
+            setText('battery-value', batteryValue);
+            setText('battery-sub', batterySub);
+
+            setText('uptime-value', formatUptime(data.uptime));
+            setText('host-sub', `${data.hostname} · ${data.platform}`);
+
+            const now = Date.now();
+            if (state.lastNet && state.lastNetAt) {
+                const seconds = Math.max(1, (now - state.lastNetAt) / 1000);
+                const rx = Math.max(0, data.netStat.rx - state.lastNet.rx) / 1024 / 1024 / seconds;
+                const tx = Math.max(0, data.netStat.tx - state.lastNet.tx) / 1024 / 1024 / seconds;
+                setText('rx-value', `${rx.toFixed(2)} MB/s`);
+                setText('tx-value', `${tx.toFixed(2)} MB/s`);
+            }
+            state.lastNet = data.netStat;
+            state.lastNetAt = now;
+
+            const sections = data.sections || {};
+            const sectionCount = Object.values(sections).reduce((sum, count) => sum + Number(count || 0), 0);
+            setText('section-value', String(sectionCount));
+            setText('section-sub', `CVE: ${sections.cve_radar || 0} · Research: ${sections.threat_intel || 0} · Actions: ${sections.defender_actions || 0}`);
+
+            const rows = (data.topProcesses || []).map(proc => `
+                <tr>
+                    <td>${escapeHtml(proc.pid)}</td>
+                    <td>${escapeHtml(proc.name)}</td>
+                    <td>${proc.cpu.toFixed(1)}%</td>
+                    <td>${proc.mem.toFixed(1)}%</td>
+                </tr>
+            `).join('');
+            document.getElementById('process-body').innerHTML = rows || '<tr><td colspan="4">No process telemetry available</td></tr>';
+        } catch (error) {
+            setText('status-text', 'System API failed');
+        }
     }
 
     function showPage(page) {
@@ -468,22 +644,13 @@
         document.getElementById('page-subtitle').textContent = pageMeta[page][1];
     }
 
-    async function loadData() {
-        try {
-            const response = await fetch('/api/discoveries');
-            state.data = await response.json();
-            render();
-        } catch (error) {
-            document.getElementById('status-text').textContent = 'Load failed';
-            document.getElementById('priority-view').innerHTML = `<div class="empty">Failed to load dashboard data: ${escapeHtml(error.message)}</div>`;
-        }
-    }
-
     document.querySelectorAll('.nav button').forEach(button => {
         button.addEventListener('click', () => showPage(button.dataset.page));
     });
 
-    loadData();
+    loadIntel();
+    loadSystem();
+    setInterval(loadSystem, 2500);
     try { lucide.createIcons(); } catch (e) {}
 </script>
 </body>
