@@ -14,16 +14,19 @@ const DASHBOARD_ROOT = process.env.THREAT_INTEL_DASHBOARD_DIR || __dirname;
 const DISCOVERIES_FILE = path.join(DASHBOARD_ROOT, 'discoveries.json');
 const PIPELINE_HEALTH_FILE = path.join(DASHBOARD_ROOT, 'pipeline-health.json');
 const PIPELINE_HISTORY_FILE = path.join(DASHBOARD_ROOT, 'pipeline-history.json');
+const BRIEFING_FILE = path.join(DASHBOARD_ROOT, 'daily-briefing.md');
 const REMOTE_SYSTEM_URL = process.env.THREAT_INTEL_SYSTEM_URL || '';
 const REMOTE_DISCOVERIES_URL = process.env.THREAT_INTEL_DISCOVERIES_URL || '';
 const REMOTE_PIPELINE_URL = process.env.THREAT_INTEL_PIPELINE_URL || '';
 const REMOTE_PIPELINE_HISTORY_URL = process.env.THREAT_INTEL_PIPELINE_HISTORY_URL || '';
+const REMOTE_BRIEFING_URL = process.env.THREAT_INTEL_BRIEFING_URL || '';
 
 const MIME_TYPES = {
     '.html': 'text/html; charset=utf-8',
     '.css': 'text/css; charset=utf-8',
     '.js': 'text/javascript; charset=utf-8',
     '.json': 'application/json; charset=utf-8',
+    '.md': 'text/markdown; charset=utf-8',
     '.png': 'image/png',
     '.jpg': 'image/jpeg',
     '.ico': 'image/x-icon',
@@ -35,6 +38,14 @@ function sendJson(res, status, payload) {
         'Access-Control-Allow-Origin': '*',
     });
     res.end(JSON.stringify(payload));
+}
+
+function sendText(res, status, text, contentType = 'text/plain; charset=utf-8') {
+    res.writeHead(status, {
+        'Content-Type': contentType,
+        'Access-Control-Allow-Origin': '*',
+    });
+    res.end(text);
 }
 
 function fetchJson(url, timeoutMs = 5000) {
@@ -55,6 +66,28 @@ function fetchJson(url, timeoutMs = 5000) {
                 } catch (error) {
                     reject(new Error('Remote API returned invalid JSON'));
                 }
+            });
+        });
+        request.on('timeout', () => request.destroy(new Error('Remote API timeout')));
+        request.on('error', reject);
+        request.end();
+    });
+}
+
+function fetchText(url, timeoutMs = 5000) {
+    return new Promise((resolve, reject) => {
+        const parsed = new URL(url);
+        const transport = parsed.protocol === 'https:' ? require('https') : require('http');
+        const request = transport.request(parsed, { method: 'GET', timeout: timeoutMs }, response => {
+            let raw = '';
+            response.setEncoding('utf8');
+            response.on('data', chunk => { raw += chunk; });
+            response.on('end', () => {
+                if (response.statusCode < 200 || response.statusCode >= 300) {
+                    reject(new Error(`Remote API returned ${response.statusCode}`));
+                    return;
+                }
+                resolve(raw);
             });
         });
         request.on('timeout', () => request.destroy(new Error('Remote API timeout')));
@@ -101,6 +134,27 @@ function pipelineFreshness(pipeline) {
 function enrichPipelineHealth(pipeline) {
     const normalized = pipeline && typeof pipeline === 'object' ? pipeline : {};
     return { ...normalized, freshness: pipelineFreshness(normalized) };
+}
+
+async function readBriefing() {
+    try {
+        if (REMOTE_BRIEFING_URL) {
+            return await fetchText(REMOTE_BRIEFING_URL);
+        }
+        return await fs.readFile(BRIEFING_FILE, 'utf-8');
+    } catch (error) {
+        return '# Threat Intelligence Briefing\n\nNo briefing has been generated yet.\n';
+    }
+}
+
+function briefingMeta(markdown) {
+    const title = (markdown.match(/^#\s+(.+)$/m) || [])[1] || 'Threat Intelligence Briefing';
+    const generated = (markdown.match(/Generated at:\s+`([^`]+)`/) || [])[1] || null;
+    return {
+        title,
+        generated_at: generated,
+        bytes: Buffer.byteLength(markdown, 'utf8'),
+    };
 }
 
 async function readDiscoveries() {
@@ -327,6 +381,17 @@ const server = http.createServer(async (req, res) => {
     try {
         if (normalizedUrl === '/api/discoveries') {
             sendJson(res, 200, await readDiscoveries());
+            return;
+        }
+
+        if (normalizedUrl === '/api/briefing') {
+            const markdown = await readBriefing();
+            sendJson(res, 200, { ...briefingMeta(markdown), markdown });
+            return;
+        }
+
+        if (normalizedUrl === '/briefing.md') {
+            sendText(res, 200, await readBriefing(), 'text/markdown; charset=utf-8');
             return;
         }
 

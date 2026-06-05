@@ -8,6 +8,7 @@ The project collects daily signals from trusted vulnerability and security resea
 - Structured CVE Radar
 - Research Watch
 - Defender Action Queue
+- Export-ready Daily Briefing
 - Pipeline Health
 - Pipeline Run History
 - Source Coverage diagnostics
@@ -43,13 +44,14 @@ This keeps the UI focused on operationally useful threat intelligence instead of
 ```text
 dashboard/
   public/index.html          Web dashboard
-  server.js                  Small Node.js static/API server with read-only telemetry and pipeline health
+  server.js                  Small Node.js static/API server with read-only telemetry, briefing, and pipeline health
 
 config/
   watchlist.json             Local relevance profile for assets, technologies, and security interests
 
 scripts/
   generate_threat_intel.py   Fetches and formats daily intelligence
+  export_daily_briefing.py   Exports an operator-readable Markdown briefing
   discoveries_pipeline.sh    Runs generation, append, and merge
   append_discoveries_json_to_inbox.py
   merge_discoveries_inbox.py
@@ -62,6 +64,12 @@ Generate and merge the latest intelligence:
 
 ```bash
 bash scripts/discoveries_pipeline.sh
+```
+
+The pipeline also exports:
+
+```text
+dashboard/daily-briefing.md
 ```
 
 Start the dashboard:
@@ -91,6 +99,7 @@ THREAT_INTEL_ROOT=/path/to/repo
 THREAT_INTEL_DASHBOARD_DIR=/path/to/repo/dashboard
 THREAT_INTEL_OUTPUT=/path/to/discoveries-generated.json
 THREAT_INTEL_WATCHLIST=/path/to/watchlist.json
+THREAT_INTEL_BRIEFING=/path/to/daily-briefing.md
 THREAT_INTEL_DISCOVERIES=/path/to/discoveries.json
 THREAT_INTEL_INBOX=/path/to/discoveries-inbox.json
 THREAT_INTEL_PIPELINE_HEALTH=/path/to/pipeline-health.json
@@ -99,13 +108,15 @@ THREAT_INTEL_SYSTEM_URL=http://remote-host:8765/api/system
 THREAT_INTEL_DISCOVERIES_URL=http://remote-host:8765/api/discoveries
 THREAT_INTEL_PIPELINE_URL=http://remote-host:8765/api/pipeline
 THREAT_INTEL_PIPELINE_HISTORY_URL=http://remote-host:8765/api/pipeline-history
+THREAT_INTEL_BRIEFING_URL=http://remote-host:8765/briefing.md
 ```
 
 When running the dashboard locally but displaying a remote homelab node, set
 `THREAT_INTEL_SYSTEM_URL`, `THREAT_INTEL_DISCOVERIES_URL`, and
 `THREAT_INTEL_PIPELINE_URL` to the remote dashboard API endpoints. Set
 `THREAT_INTEL_PIPELINE_HISTORY_URL` as well when you want local dashboard views
-to mirror the remote run history.
+to mirror the remote run history. Set `THREAT_INTEL_BRIEFING_URL` when you want
+the local Briefing tab to mirror the remote Markdown export.
 
 ## Local Relevance Watchlist
 
@@ -130,6 +141,21 @@ Generated CVE items include:
 
 The dashboard can filter CVEs to watchlist matches only.
 
+## Daily Briefing
+
+After merge completes, `scripts/export_daily_briefing.py` creates a Markdown
+briefing from validated dashboard data. It includes:
+
+- Executive summary
+- Top vulnerabilities
+- Local relevance summary
+- Defender actions
+- Research watch
+- Source coverage
+
+The dashboard serves it through `/api/briefing` for preview and `/briefing.md`
+for direct Markdown access.
+
 ## Automation
 
 The pipeline is compatible with cron or an agent scheduler such as OpenClaw. The agent should only run the shell pipeline and should not edit dashboard data directly:
@@ -144,6 +170,7 @@ bash scripts/discoveries_pipeline.sh
 - The merge step accepts only the three allowed intelligence kinds.
 - Structured CVE and research metadata is allowed only through fixed `items` and `sources` fields.
 - Defender actions are generated as a constrained queue with priority, category, owner, due window, and related CVEs or sources.
+- The Markdown briefing is generated only after validated data is merged.
 - Local watchlist relevance is deterministic and read from `config/watchlist.json`.
 - Collection diagnostics record source success/failure and item counts for KEV, NVD, EPSS, and each research feed.
 - RSS research entries are filtered by security keywords to avoid conference, interview, or general technology content.

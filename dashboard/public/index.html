@@ -512,6 +512,32 @@
             padding: 14px;
         }
 
+        .toolbar {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 14px;
+        }
+
+        .button-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            border-radius: var(--radius);
+            border: 1px solid rgba(56, 189, 248, 0.28);
+            background: rgba(56, 189, 248, 0.1);
+            color: var(--blue);
+            padding: 9px 12px;
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: 800;
+        }
+
+        .button-link:hover {
+            background: rgba(56, 189, 248, 0.16);
+        }
+
         .pipeline {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -599,6 +625,7 @@
             <button data-page="cve"><i data-lucide="shield-alert"></i><span>CVE Radar</span></button>
             <button data-page="research"><i data-lucide="rss"></i><span>Research Watch</span></button>
             <button data-page="actions"><i data-lucide="list-checks"></i><span>Defender Actions</span></button>
+            <button data-page="briefing"><i data-lucide="newspaper"></i><span>Briefing</span></button>
             <button data-page="pipeline"><i data-lucide="workflow"></i><span>Pipeline</span></button>
         </nav>
     </aside>
@@ -716,6 +743,18 @@
             <div id="actions-view"></div>
         </section>
 
+        <section id="page-briefing" class="page">
+            <div id="briefing-summary-grid" class="grid"></div>
+            <div class="section-title"><i data-lucide="newspaper"></i><span>Daily Briefing</span></div>
+            <div class="toolbar">
+                <a class="button-link" href="/briefing.md" target="_blank" rel="noreferrer"><i data-lucide="download"></i><span>Open Markdown</span></a>
+                <span class="stat-sub" id="briefing-meta">Briefing not loaded</span>
+            </div>
+            <article class="article">
+                <div id="briefing-view" class="markdown">Loading briefing</div>
+            </article>
+        </section>
+
         <section id="page-pipeline" class="page">
             <div class="grid" id="pipeline-stats"></div>
             <div class="section-title"><i data-lucide="circle-check-big"></i><span>Last Run</span></div>
@@ -744,11 +783,13 @@
         cve: ['CVE Radar', 'Prioritized vulnerability signals using KEV, CVSS, and EPSS context.'],
         research: ['Research Watch', 'Recent posts from professional security research teams.'],
         actions: ['Defender Actions', 'Operational Checklist generated from the daily intelligence set.'],
+        briefing: ['Daily Briefing', 'Export-ready Markdown summary generated after the intelligence pipeline merges validated data.'],
         pipeline: ['Pipeline', 'How the automation collects, validates, merges, and renders intelligence.'],
     };
 
     const state = {
         data: {},
+        briefing: null,
         pipeline: null,
         pipelineHistory: [],
         cveFilters: { query: '', priority: 'all', kevOnly: false, watchlistOnly: false },
@@ -1156,6 +1197,7 @@
             statCard('Freshness', freshness.age_label || 'Unknown'),
             statCard('Last finished', formatDateTime(pipeline.finished_at)),
             statCard('Generated items', pipeline.generated_items ?? '--'),
+            statCard('Briefing size', pipeline.briefing_bytes ? `${Math.round(pipeline.briefing_bytes / 1024)} KB` : '--'),
             statCard('Failed sources', collection ? collection.failed_source_count : '--'),
         ].join('');
 
@@ -1168,6 +1210,7 @@
                     ${statCard('Merged', merge.merged ?? '--')}
                     ${statCard('Updated', merge.updated ?? '--')}
                     ${statCard('Rejected', rejected)}
+                    ${statCard('Briefing', pipeline.briefing && pipeline.briefing.bytes ? `${Math.round(pipeline.briefing.bytes / 1024)} KB` : '--')}
                 </div>
                 <div class="stat-sub">${escapeHtml(freshness.message || 'No freshness state recorded.')}</div>
                 <div class="stat-sub">${escapeHtml(pipeline.message || 'No pipeline message recorded.')}</div>
@@ -1236,6 +1279,22 @@
         document.getElementById('actions-table-view').innerHTML = renderActionQueue(actions);
         document.getElementById('actions-view').innerHTML = article(actions, 'Defender Actions');
         renderPipeline(latestDate, collection);
+        renderBriefing();
+        try { lucide.createIcons(); } catch (e) {}
+    }
+
+    function renderBriefing() {
+        const briefing = state.briefing || {};
+        const markdown = briefing.markdown || 'No briefing has been generated yet.';
+        const executiveItems = (markdown.match(/^- /gm) || []).length;
+        document.getElementById('briefing-summary-grid').innerHTML = [
+            statCard('Title', briefing.title || 'Threat Intelligence Briefing'),
+            statCard('Generated', formatDateTime(briefing.generated_at)),
+            statCard('Size', briefing.bytes ? `${Math.round(briefing.bytes / 1024)} KB` : '--'),
+            statCard('Summary bullets', executiveItems || '--'),
+        ].join('');
+        setText('briefing-meta', briefing.generated_at ? `Generated ${formatDateTime(briefing.generated_at)}` : 'Generated time unavailable');
+        document.getElementById('briefing-view').innerHTML = safeMarkdown(markdown);
         try { lucide.createIcons(); } catch (e) {}
     }
 
@@ -1269,6 +1328,17 @@
         } catch (error) {
             state.pipelineHistory = [];
             renderIntel();
+        }
+    }
+
+    async function loadBriefing() {
+        try {
+            const response = await fetch('/api/briefing');
+            state.briefing = await response.json();
+            renderBriefing();
+        } catch (error) {
+            state.briefing = { markdown: `# Threat Intelligence Briefing\n\nFailed to load briefing: ${error.message}` };
+            renderBriefing();
         }
     }
 
@@ -1386,11 +1456,13 @@
     }
 
     loadIntel();
+    loadBriefing();
     loadPipeline();
     loadPipelineHistory();
     loadSystem();
     setInterval(loadSystem, 2500);
     setInterval(loadIntel, 300000);
+    setInterval(loadBriefing, 300000);
     setInterval(loadPipeline, 60000);
     setInterval(loadPipelineHistory, 60000);
     try { lucide.createIcons(); } catch (e) {}

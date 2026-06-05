@@ -2,6 +2,7 @@ dashboard/discoveries.json
 dashboard/discoveries.json.bak
 dashboard/discoveries-generated.json
 dashboard/discoveries-inbox.json
+dashboard/daily-briefing.md
 dashboard/server.log
 runs/
 __pycache__/
