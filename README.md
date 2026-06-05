@@ -9,6 +9,7 @@ The project collects daily signals from trusted vulnerability and security resea
 - Research Watch
 - Defender Action Queue
 - Pipeline Health
+- Pipeline Run History
 - Source Coverage diagnostics
 
 ## Data Sources
@@ -81,14 +82,18 @@ THREAT_INTEL_OUTPUT=/path/to/discoveries-generated.json
 THREAT_INTEL_DISCOVERIES=/path/to/discoveries.json
 THREAT_INTEL_INBOX=/path/to/discoveries-inbox.json
 THREAT_INTEL_PIPELINE_HEALTH=/path/to/pipeline-health.json
+THREAT_INTEL_PIPELINE_HISTORY=/path/to/pipeline-history.json
 THREAT_INTEL_SYSTEM_URL=http://remote-host:8765/api/system
 THREAT_INTEL_DISCOVERIES_URL=http://remote-host:8765/api/discoveries
 THREAT_INTEL_PIPELINE_URL=http://remote-host:8765/api/pipeline
+THREAT_INTEL_PIPELINE_HISTORY_URL=http://remote-host:8765/api/pipeline-history
 ```
 
 When running the dashboard locally but displaying a remote homelab node, set
 `THREAT_INTEL_SYSTEM_URL`, `THREAT_INTEL_DISCOVERIES_URL`, and
-`THREAT_INTEL_PIPELINE_URL` to the remote dashboard API endpoints.
+`THREAT_INTEL_PIPELINE_URL` to the remote dashboard API endpoints. Set
+`THREAT_INTEL_PIPELINE_HISTORY_URL` as well when you want local dashboard views
+to mirror the remote run history.
 
 ## Automation
 

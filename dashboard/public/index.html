@@ -589,6 +589,8 @@
             <div class="grid" id="pipeline-stats"></div>
             <div class="section-title"><i data-lucide="circle-check-big"></i><span>Last Run</span></div>
             <div id="pipeline-run"></div>
+            <div class="section-title"><i data-lucide="history"></i><span>Run History</span></div>
+            <div id="pipeline-history"></div>
             <div class="section-title"><i data-lucide="satellite-dish"></i><span>Source Coverage</span></div>
             <div id="source-coverage"></div>
             <div class="section-title"><i data-lucide="workflow"></i><span>Automation Flow</span></div>
@@ -614,7 +616,7 @@
         pipeline: ['Pipeline', 'How the automation collects, validates, merges, and renders intelligence.'],
     };
 
-    const state = { data: {}, pipeline: null, samples: [], lastNet: null, lastNetAt: 0 };
+    const state = { data: {}, pipeline: null, pipelineHistory: [], samples: [], lastNet: null, lastNetAt: 0 };
 
     function safeMarkdown(md) {
         return DOMPurify.sanitize(marked.parse(md || ''));
@@ -865,6 +867,37 @@
         `;
     }
 
+    function renderPipelineHistory(history) {
+        if (!Array.isArray(history) || !history.length) {
+            return '<div class="empty">No pipeline history has been recorded yet.</div>';
+        }
+        const rows = history.slice(0, 10).map(run => {
+            const merge = run.merge || {};
+            const rejected = Array.isArray(merge.rejected) ? merge.rejected.length : 0;
+            return `
+                <tr>
+                    <td>${badge(run.status === 'ok' ? 'OK' : 'Failed')}</td>
+                    <td>${escapeHtml(formatDateTime(run.finished_at))}</td>
+                    <td>${escapeHtml(run.stage || '--')}</td>
+                    <td>${escapeHtml(run.generated_items ?? '--')}</td>
+                    <td>${escapeHtml(merge.merged ?? '--')}</td>
+                    <td>${escapeHtml(merge.updated ?? '--')}</td>
+                    <td>${escapeHtml(rejected)}</td>
+                    <td>${escapeHtml(run.message || '')}</td>
+                </tr>
+            `;
+        }).join('');
+        return `
+            <div class="table-wrap run-card">
+                <table class="cve-table">
+                    <thead><tr><th>Status</th><th>Finished</th><th>Stage</th><th>Generated</th><th>Merged</th><th>Updated</th><th>Rejected</th><th>Message</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+        `;
+    }
+
+
     function renderResourceHealth(data) {
         const warnings = [];
         const critical = [];
@@ -916,6 +949,7 @@
                 <div class="stat-sub">${escapeHtml(pipeline.message || 'No pipeline message recorded.')}</div>
             </div>
         `;
+        document.getElementById('pipeline-history').innerHTML = renderPipelineHistory(state.pipelineHistory);
         document.getElementById('source-coverage').innerHTML = renderSourceCoverage(collection);
     }
 
@@ -980,6 +1014,18 @@
             renderIntel();
         } catch (error) {
             state.pipeline = { status: 'failed', message: error.message };
+            renderIntel();
+        }
+    }
+
+    async function loadPipelineHistory() {
+        try {
+            const response = await fetch('/api/pipeline-history');
+            const history = await response.json();
+            state.pipelineHistory = Array.isArray(history) ? history : [];
+            renderIntel();
+        } catch (error) {
+            state.pipelineHistory = [];
             renderIntel();
         }
     }
@@ -1067,10 +1113,12 @@
 
     loadIntel();
     loadPipeline();
+    loadPipelineHistory();
     loadSystem();
     setInterval(loadSystem, 2500);
     setInterval(loadIntel, 300000);
     setInterval(loadPipeline, 60000);
+    setInterval(loadPipelineHistory, 60000);
     try { lucide.createIcons(); } catch (e) {}
 </script>
 </body>

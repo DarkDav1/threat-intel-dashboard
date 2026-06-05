@@ -13,9 +13,11 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 const DASHBOARD_ROOT = process.env.THREAT_INTEL_DASHBOARD_DIR || __dirname;
 const DISCOVERIES_FILE = path.join(DASHBOARD_ROOT, 'discoveries.json');
 const PIPELINE_HEALTH_FILE = path.join(DASHBOARD_ROOT, 'pipeline-health.json');
+const PIPELINE_HISTORY_FILE = path.join(DASHBOARD_ROOT, 'pipeline-history.json');
 const REMOTE_SYSTEM_URL = process.env.THREAT_INTEL_SYSTEM_URL || '';
 const REMOTE_DISCOVERIES_URL = process.env.THREAT_INTEL_DISCOVERIES_URL || '';
 const REMOTE_PIPELINE_URL = process.env.THREAT_INTEL_PIPELINE_URL || '';
+const REMOTE_PIPELINE_HISTORY_URL = process.env.THREAT_INTEL_PIPELINE_HISTORY_URL || '';
 
 const MIME_TYPES = {
     '.html': 'text/html; charset=utf-8',
@@ -104,6 +106,20 @@ async function readPipelineHealth() {
             append: null,
             merge: null,
         };
+    }
+}
+
+async function readPipelineHistory() {
+    try {
+        if (REMOTE_PIPELINE_HISTORY_URL) {
+            const remote = await fetchJson(REMOTE_PIPELINE_HISTORY_URL);
+            return Array.isArray(remote) ? remote.slice(0, 20) : [];
+        }
+        const raw = await fs.readFile(PIPELINE_HISTORY_FILE, 'utf-8');
+        const data = JSON.parse(raw);
+        return Array.isArray(data) ? data.slice(0, 20) : [];
+    } catch (error) {
+        return [];
     }
 }
 
@@ -288,6 +304,11 @@ const server = http.createServer(async (req, res) => {
 
         if (normalizedUrl === '/api/pipeline') {
             sendJson(res, 200, await readPipelineHealth());
+            return;
+        }
+
+        if (normalizedUrl === '/api/pipeline-history') {
+            sendJson(res, 200, await readPipelineHistory());
             return;
         }
 

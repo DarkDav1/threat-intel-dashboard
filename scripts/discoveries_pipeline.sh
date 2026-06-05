@@ -10,6 +10,7 @@ GENERATE_SCRIPT="$ROOT/scripts/generate_threat_intel.py"
 RUNS_FILE="${THREAT_INTEL_RUNS_FILE:-$ROOT/runs/daily_surfing.jsonl}"
 GENERATED_FILE="${THREAT_INTEL_OUTPUT:-$DASHBOARD_DIR/discoveries-generated.json}"
 HEALTH_FILE="${THREAT_INTEL_PIPELINE_HEALTH:-$DASHBOARD_DIR/pipeline-health.json}"
+HISTORY_FILE="${THREAT_INTEL_PIPELINE_HISTORY:-$DASHBOARD_DIR/pipeline-history.json}"
 STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 STAGE="init"
 APPEND_OUTPUT=""
@@ -30,6 +31,7 @@ write_health() {
   PIPE_MERGE_OUTPUT="$MERGE_OUTPUT" \
   PIPE_GENERATED_FILE="$GENERATED_FILE" \
   PIPE_HEALTH_FILE="$HEALTH_FILE" \
+  PIPE_HISTORY_FILE="$HISTORY_FILE" \
   python3 <<'PY'
 import json
 import os
@@ -70,6 +72,19 @@ payload = {
 health = Path(os.environ['PIPE_HEALTH_FILE'])
 health.parent.mkdir(parents=True, exist_ok=True)
 health.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+
+history_path = Path(os.environ['PIPE_HISTORY_FILE'])
+history_path.parent.mkdir(parents=True, exist_ok=True)
+try:
+    history = json.loads(history_path.read_text(encoding='utf-8'))
+    if not isinstance(history, list):
+        history = []
+except Exception:
+    history = []
+
+history.insert(0, payload)
+history = history[:20]
+history_path.write_text(json.dumps(history, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
 PY
 }
 
