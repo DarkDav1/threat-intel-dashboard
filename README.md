@@ -65,7 +65,7 @@ Open:
 http://localhost:8765
 ```
 
-The landing page is a read-only resource monitor for the host running the pipeline. It includes threshold-based health status and the last telemetry update time. Threat intelligence views are available in the navigation.
+The landing page is a read-only resource monitor for the host running the pipeline. It includes threshold-based health status, the last telemetry update time, telemetry source status, and short in-browser trend charts for CPU, memory, temperature, and network throughput. Threat intelligence views are available in the navigation.
 
 ## Configuration
 
