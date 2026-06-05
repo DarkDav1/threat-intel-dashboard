@@ -289,11 +289,49 @@ The pipeline is compatible with cron or an agent scheduler such as OpenClaw. The
 bash scripts/discoveries_pipeline.sh
 ```
 
+## Codex Ops Watch Automation
+
+The live Codex App automation is named:
+
+```text
+Threat Intel Ops Watch
+```
+
+Automation id:
+
+```text
+threat-intel-ops-watch
+```
+
+It runs hourly as a read-only operations watch. The automation reads only these
+local dashboard APIs:
+
+- `http://127.0.0.1:9876/api/defense-history`
+- `http://127.0.0.1:9876/api/pipeline`
+- `http://127.0.0.1:9876/api/briefing`
+
+It reports in concise Chinese when attention is needed:
+
+- `requires_approval`, `failed`, or `rejected` defense events
+- stale or failed pipeline status
+- missing or unusually old briefing data
+
+The automation is intentionally not part of the real-time defense path. Real-time
+alerts go to the gpd webhook receiver, which calls the deterministic dispatcher.
+Codex only performs scheduled review and summarization.
+
+Current Codex automation prompt:
+
+```text
+Check the threat intelligence dashboard operational state by reading only these local APIs: http://127.0.0.1:9876/api/defense-history, http://127.0.0.1:9876/api/pipeline, and http://127.0.0.1:9876/api/briefing. Summarize in concise Chinese only when attention is needed: requires_approval, failed, rejected defense events, stale or failed pipeline status, missing briefing, or unusually old briefing data. If everything is healthy, report a short healthy status. Do not execute any commands that block IPs, restart services, delete files, modify firewall rules, modify system configuration, or change repository files.
+```
+
 ## Safety Boundaries
 
 - The dashboard API is read-only.
 - Defense automation is policy-gated and dry-run by default.
 - The first auto-defense runbook only permits a temporary single public IP block for SSH brute force.
+- Codex automation is read-only and limited to operations review, not real-time defense execution.
 - The merge step accepts only the three allowed intelligence kinds.
 - Structured CVE and research metadata is allowed only through fixed `items` and `sources` fields.
 - Defender actions are generated as a constrained queue with priority, category, owner, due window, and related CVEs or sources.
