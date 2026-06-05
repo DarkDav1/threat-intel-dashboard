@@ -9,7 +9,6 @@ The project collects daily signals from trusted vulnerability and security resea
 - Detection Coverage
 - Research Watch
 - Defender Action Queue
-- Telegram-ready Defense Ops history
 - Export-ready Daily Briefing
 - Pipeline Health
 - Pipeline Run History
@@ -50,13 +49,10 @@ dashboard/
 
 config/
   watchlist.json             Local relevance profile for assets, technologies, and security interests
-  defense_policy.json        Policy gate for defensive automation
 
 scripts/
   generate_threat_intel.py   Fetches and formats daily intelligence
   export_daily_briefing.py   Exports an operator-readable Markdown briefing
-  defense_dispatcher.py      Validates alerts and runs policy-gated defensive runbooks
-  defense_webhook_server.py  Receives alert or Telegram webhook events and calls the dispatcher
   discoveries_pipeline.sh    Runs generation, append, and merge
   append_discoveries_json_to_inbox.py
   merge_discoveries_inbox.py
@@ -113,20 +109,11 @@ THREAT_INTEL_DISCOVERIES=/path/to/discoveries.json
 THREAT_INTEL_INBOX=/path/to/discoveries-inbox.json
 THREAT_INTEL_PIPELINE_HEALTH=/path/to/pipeline-health.json
 THREAT_INTEL_PIPELINE_HISTORY=/path/to/pipeline-history.json
-THREAT_INTEL_DEFENSE_POLICY=/path/to/defense_policy.json
-THREAT_INTEL_DEFENSE_HISTORY=/path/to/defense-history.json
-DEFENSE_WEBHOOK_HOST=127.0.0.1
-DEFENSE_WEBHOOK_PORT=8787
-DEFENSE_WEBHOOK_TOKEN=shared-secret
-TELEGRAM_BOT_TOKEN=123456:telegram-token
-TELEGRAM_CHAT_ID=1862711362
-TELEGRAM_ALLOWED_CHAT_ID=1862711362
 THREAT_INTEL_SYSTEM_URL=http://remote-host:8765/api/system
 THREAT_INTEL_DISCOVERIES_URL=http://remote-host:8765/api/discoveries
 THREAT_INTEL_PIPELINE_URL=http://remote-host:8765/api/pipeline
 THREAT_INTEL_PIPELINE_HISTORY_URL=http://remote-host:8765/api/pipeline-history
 THREAT_INTEL_BRIEFING_URL=http://remote-host:8765/briefing.md
-THREAT_INTEL_DEFENSE_HISTORY_URL=http://remote-host:8765/api/defense-history
 ```
 
 When running the dashboard locally but displaying a remote homelab node, set
@@ -134,9 +121,7 @@ When running the dashboard locally but displaying a remote homelab node, set
 `THREAT_INTEL_PIPELINE_URL` to the remote dashboard API endpoints. Set
 `THREAT_INTEL_PIPELINE_HISTORY_URL` as well when you want local dashboard views
 to mirror the remote run history. Set `THREAT_INTEL_BRIEFING_URL` when you want
-the local Briefing tab to mirror the remote Markdown export. Set
-`THREAT_INTEL_DEFENSE_HISTORY_URL` when you want the local Defense Ops tab to
-mirror remote defense history.
+the local Briefing tab to mirror the remote Markdown export.
 
 ## Local Relevance Watchlist
 
@@ -178,109 +163,6 @@ briefing from validated dashboard data. It includes:
 The dashboard serves it through `/api/briefing` for preview and `/briefing.md`
 for direct Markdown access.
 
-## Defense Ops MVP
-
-`scripts/defense_dispatcher.py` accepts either normalized alert JSON or a
-Telegram update containing JSON or key-value alert text. The dispatcher validates
-the alert against `config/defense_policy.json`, writes a defense history entry,
-and returns a Telegram-ready reply.
-
-Default behavior is dry-run. The first auto-allowed rule is intentionally narrow:
-
-- Alert type: `ssh_bruteforce`
-- Action: temporary single-IP UFW block
-- TTL: 120 minutes
-- Guardrails: trusted host only, minimum severity/count, public IP only, protected CIDRs blocked from action
-
-Example normalized alert:
-
-```json
-{
-  "source": "wazuh",
-  "severity": "high",
-  "type": "ssh_bruteforce",
-  "host": "gpd",
-  "src_ip": "1.2.3.4",
-  "count": 50,
-  "time": "2026-06-06T10:30:00Z"
-}
-```
-
-Run in dry-run mode:
-
-```bash
-python3 scripts/defense_dispatcher.py alert.json
-```
-
-Live mode requires both environment variables:
-
-```bash
-DEFENSE_EXECUTION_MODE=live DEFENSE_ALLOW_LIVE=1 python3 scripts/defense_dispatcher.py alert.json
-```
-
-The dashboard exposes the resulting history through `/api/defense-history` and
-the Defense Ops tab. The dashboard does not execute defense actions directly.
-
-## Telegram Automation Receiver
-
-`scripts/defense_webhook_server.py` is the first automation entry point for
-real-time alert handling. It accepts two POST endpoints:
-
-- `/alert` for normalized alert JSON
-- `/telegram` for Telegram webhook update JSON
-
-Both endpoints call `defense_dispatcher.py` internally, so the same policy gate,
-dry-run default, protected CIDRs, trusted hosts, and history writing are used.
-The webhook service does not expose any dashboard write or command endpoint.
-
-Start the receiver locally:
-
-```bash
-DEFENSE_WEBHOOK_TOKEN=change-me \
-python3 scripts/defense_webhook_server.py
-```
-
-Health check:
-
-```bash
-curl http://127.0.0.1:8787/healthz
-```
-
-Send a normalized alert:
-
-```bash
-curl -sS http://127.0.0.1:8787/alert \
-  -H 'Content-Type: application/json' \
-  -H 'X-Defense-Token: change-me' \
-  -d '{
-    "source": "wazuh",
-    "severity": "high",
-    "type": "ssh_bruteforce",
-    "host": "gpd",
-    "src_ip": "1.2.3.4",
-    "count": 20,
-    "message": "Repeated failed SSH logins"
-  }'
-```
-
-Telegram replies are optional. If `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`
-are configured, the receiver sends the dispatcher result back to Telegram.
-If they are not configured, events are still recorded and returned in the HTTP
-response.
-
-Register a Telegram webhook through your reverse proxy URL:
-
-```bash
-curl "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
-  -d "url=https://example.com/telegram" \
-  -d "secret_token=${DEFENSE_WEBHOOK_TOKEN}"
-```
-
-When using Telegram's `secret_token`, configure the reverse proxy to copy it to
-the request header. The receiver accepts Telegram's native
-`X-Telegram-Bot-Api-Secret-Token` header as well as `X-Defense-Token`. Keep the
-Python receiver bound to `127.0.0.1` unless it is behind a reverse proxy.
-
 ## Automation
 
 The pipeline is compatible with cron or an agent scheduler such as OpenClaw. The agent should only run the shell pipeline and should not edit dashboard data directly:
@@ -292,8 +174,6 @@ bash scripts/discoveries_pipeline.sh
 ## Safety Boundaries
 
 - The dashboard API is read-only.
-- Defense automation is policy-gated and dry-run by default.
-- The first auto-defense runbook only permits a temporary single public IP block for SSH brute force.
 - The merge step accepts only the three allowed intelligence kinds.
 - Structured CVE and research metadata is allowed only through fixed `items` and `sources` fields.
 - Defender actions are generated as a constrained queue with priority, category, owner, due window, and related CVEs or sources.

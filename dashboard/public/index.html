@@ -626,7 +626,6 @@
             <button data-page="detection"><i data-lucide="radar"></i><span>Detection</span></button>
             <button data-page="research"><i data-lucide="rss"></i><span>Research Watch</span></button>
             <button data-page="actions"><i data-lucide="list-checks"></i><span>Defender Actions</span></button>
-            <button data-page="defense"><i data-lucide="lock-keyhole"></i><span>Defense Ops</span></button>
             <button data-page="briefing"><i data-lucide="newspaper"></i><span>Briefing</span></button>
             <button data-page="pipeline"><i data-lucide="workflow"></i><span>Pipeline</span></button>
         </nav>
@@ -705,13 +704,13 @@
             </div>
         </section>
 
-        <section id="page-overview" class="page" hidden>
+        <section id="page-overview" class="page">
             <div id="overview-grid" class="grid"></div>
             <div class="section-title"><i data-lucide="target"></i><span>Current Priority</span></div>
             <div id="priority-view"></div>
         </section>
 
-        <section id="page-cve" class="page" hidden>
+        <section id="page-cve" class="page">
             <div id="cve-summary-grid" class="grid"></div>
             <div class="section-title"><i data-lucide="shield-alert"></i><span>Prioritized Vulnerabilities</span></div>
             <div class="filter-bar">
@@ -730,19 +729,19 @@
             <div class="section-title"><i data-lucide="file-text"></i><span>Assessment Notes</span></div>
             <div id="cve-view"></div>
         </section>
-        <section id="page-detection" class="page" hidden>
+        <section id="page-detection" class="page">
             <div id="detection-summary-grid" class="grid"></div>
             <div class="section-title"><i data-lucide="radar"></i><span>Detection Coverage</span></div>
             <div id="detection-table-view"></div>
         </section>
-        <section id="page-research" class="page" hidden>
+        <section id="page-research" class="page">
             <div id="research-summary-grid" class="grid"></div>
             <div class="section-title"><i data-lucide="rss"></i><span>Research Items</span></div>
             <div id="research-list-view"></div>
             <div class="section-title"><i data-lucide="file-text"></i><span>Research Notes</span></div>
             <div id="research-view"></div>
         </section>
-        <section id="page-actions" class="page" hidden>
+        <section id="page-actions" class="page">
             <div id="actions-summary-grid" class="grid"></div>
             <div class="section-title"><i data-lucide="list-checks"></i><span>Action Queue</span></div>
             <div id="actions-table-view"></div>
@@ -750,13 +749,7 @@
             <div id="actions-view"></div>
         </section>
 
-        <section id="page-defense" class="page" hidden>
-            <div id="defense-summary-grid" class="grid"></div>
-            <div class="section-title"><i data-lucide="lock-keyhole"></i><span>Defense History</span></div>
-            <div id="defense-history-view"></div>
-        </section>
-
-        <section id="page-briefing" class="page" hidden>
+        <section id="page-briefing" class="page">
             <div id="briefing-summary-grid" class="grid"></div>
             <div class="section-title"><i data-lucide="newspaper"></i><span>Daily Briefing</span></div>
             <div class="toolbar">
@@ -768,7 +761,7 @@
             </article>
         </section>
 
-        <section id="page-pipeline" class="page" hidden>
+        <section id="page-pipeline" class="page">
             <div class="grid" id="pipeline-stats"></div>
             <div class="section-title"><i data-lucide="circle-check-big"></i><span>Last Run</span></div>
             <div id="pipeline-run"></div>
@@ -797,7 +790,6 @@
         detection: ['Detection Coverage', 'Deterministic log-source and hunt guidance mapped from prioritized CVE signals.'],
         research: ['Research Watch', 'Recent posts from professional security research teams.'],
         actions: ['Defender Actions', 'Operational Checklist generated from the daily intelligence set.'],
-        defense: ['Defense Ops', 'Policy-gated defensive automation history from Telegram or normalized alert input.'],
         briefing: ['Daily Briefing', 'Export-ready Markdown summary generated after the intelligence pipeline merges validated data.'],
         pipeline: ['Pipeline', 'How the automation collects, validates, merges, and renders intelligence.'],
     };
@@ -805,7 +797,6 @@
     const state = {
         data: {},
         briefing: null,
-        defenseHistory: [],
         pipeline: null,
         pipelineHistory: [],
         cveFilters: { query: '', priority: 'all', kevOnly: false, watchlistOnly: false },
@@ -1201,45 +1192,6 @@
         `;
     }
 
-    function renderDefenseHistory(history) {
-        if (!Array.isArray(history) || !history.length) {
-            return '<div class="empty">No defense automation events have been recorded yet.</div>';
-        }
-        const rows = history.slice(0, 20).map(record => {
-            const alert = record.alert || {};
-            const decision = record.decision || {};
-            const command = record.execution && Array.isArray(record.execution.command)
-                ? record.execution.command.join(' ')
-                : '';
-            return `
-                <tr>
-                    <td>${badge(record.status || 'recorded')}</td>
-                    <td>${escapeHtml(record.mode || 'dry-run')}</td>
-                    <td>
-                        <strong>${escapeHtml(alert.type || 'unknown')}</strong>
-                        <div class="muted">${escapeHtml(alert.source || 'source')} · ${escapeHtml(alert.severity || 'info')} · ${escapeHtml(alert.host || 'host')}</div>
-                    </td>
-                    <td class="mono">${escapeHtml(alert.src_ip || '--')}</td>
-                    <td>
-                        <strong>${escapeHtml(decision.action || 'none')}</strong>
-                        <div class="muted">${escapeHtml(decision.reason || '')}</div>
-                        ${command ? `<div class="muted mono">${escapeHtml(command)}</div>` : ''}
-                    </td>
-                    <td>${escapeHtml(record.expires_at ? formatDateTime(record.expires_at) : '--')}</td>
-                    <td><div class="muted">${escapeHtml(record.telegram_reply || '').slice(0, 260)}</div></td>
-                </tr>
-            `;
-        }).join('');
-        return `
-            <div class="table-wrap">
-                <table class="cve-table">
-                    <thead><tr><th>Status</th><th>Mode</th><th>Alert</th><th>Source IP</th><th>Decision</th><th>Expires</th><th>Telegram Reply</th></tr></thead>
-                    <tbody>${rows}</tbody>
-                </table>
-            </div>
-        `;
-    }
-
 
     function renderResourceHealth(data) {
         const warnings = [];
@@ -1371,24 +1323,8 @@
         ].join('');
         document.getElementById('actions-table-view').innerHTML = renderActionQueue(actions);
         document.getElementById('actions-view').innerHTML = article(actions, 'Defender Actions');
-        renderDefenseOps();
         renderPipeline(latestDate, collection);
         renderBriefing();
-        try { lucide.createIcons(); } catch (e) {}
-    }
-
-    function renderDefenseOps() {
-        const history = Array.isArray(state.defenseHistory) ? state.defenseHistory : [];
-        const autoEvents = history.filter(record => ['simulated', 'executed'].includes(record.status));
-        const approvalEvents = history.filter(record => record.status === 'requires_approval');
-        const rejectedEvents = history.filter(record => record.status === 'rejected');
-        document.getElementById('defense-summary-grid').innerHTML = [
-            statCard('Events', history.length),
-            statCard('Auto decisions', autoEvents.length),
-            statCard('Approval needed', approvalEvents.length),
-            statCard('Rejected', rejectedEvents.length),
-        ].join('');
-        document.getElementById('defense-history-view').innerHTML = renderDefenseHistory(history);
         try { lucide.createIcons(); } catch (e) {}
     }
 
@@ -1448,18 +1384,6 @@
         } catch (error) {
             state.briefing = { markdown: `# Threat Intelligence Briefing\n\nFailed to load briefing: ${error.message}` };
             renderBriefing();
-        }
-    }
-
-    async function loadDefenseHistory() {
-        try {
-            const response = await fetch('/api/defense-history');
-            const history = await response.json();
-            state.defenseHistory = Array.isArray(history) ? history : [];
-            renderDefenseOps();
-        } catch (error) {
-            state.defenseHistory = [];
-            renderDefenseOps();
         }
     }
 
@@ -1533,12 +1457,9 @@
     }
 
     function showPage(page) {
-        document.querySelectorAll('.page').forEach(el => {
-            const isActive = el.id === `page-${page}`;
-            el.classList.toggle('active', isActive);
-            el.hidden = !isActive;
-        });
+        document.querySelectorAll('.page').forEach(el => el.classList.remove('active'));
         document.querySelectorAll('.nav button').forEach(el => el.classList.toggle('active', el.dataset.page === page));
+        document.getElementById(`page-${page}`).classList.add('active');
         document.getElementById('page-title').textContent = pageMeta[page][0];
         document.getElementById('page-subtitle').textContent = pageMeta[page][1];
     }
@@ -1581,14 +1502,12 @@
 
     loadIntel();
     loadBriefing();
-    loadDefenseHistory();
     loadPipeline();
     loadPipelineHistory();
     loadSystem();
     setInterval(loadSystem, 2500);
     setInterval(loadIntel, 300000);
     setInterval(loadBriefing, 300000);
-    setInterval(loadDefenseHistory, 60000);
     setInterval(loadPipeline, 60000);
     setInterval(loadPipelineHistory, 60000);
     try { lucide.createIcons(); } catch (e) {}
