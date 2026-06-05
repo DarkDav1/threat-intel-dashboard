@@ -358,6 +358,79 @@
             background: rgba(251, 113, 133, 0.1);
         }
 
+        .filter-bar {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 14px;
+        }
+
+        .search-box {
+            min-width: 260px;
+            flex: 1 1 280px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            background: var(--panel);
+            padding: 10px 12px;
+            color: var(--muted);
+        }
+
+        .search-box input {
+            width: 100%;
+            border: 0;
+            outline: 0;
+            background: transparent;
+            color: var(--text);
+            font: inherit;
+        }
+
+        .segmented {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 4px;
+            background: var(--panel);
+        }
+
+        .segmented button {
+            all: unset;
+            padding: 7px 10px;
+            border-radius: 7px;
+            color: var(--muted);
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 800;
+        }
+
+        .segmented button.active {
+            background: rgba(56, 189, 248, 0.12);
+            color: var(--blue);
+        }
+
+        .check-filter {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 9px 11px;
+            background: var(--panel);
+            color: var(--muted);
+            font-size: 12px;
+            font-weight: 800;
+            cursor: pointer;
+        }
+
+        .check-filter input {
+            accent-color: var(--blue);
+        }
+
         .muted { color: var(--muted); }
         .mono { font-family: "JetBrains Mono", monospace; }
 
@@ -466,6 +539,9 @@
         @media (max-width: 560px) {
             .resource-grid { grid-template-columns: 1fr; }
             .trend-grid { grid-template-columns: 1fr; }
+            .search-box { min-width: 100%; }
+            .segmented { width: 100%; justify-content: space-between; }
+            .segmented button { flex: 1; text-align: center; }
             .title h2 { font-size: 25px; }
         }
     </style>
@@ -572,6 +648,17 @@
         <section id="page-cve" class="page">
             <div id="cve-summary-grid" class="grid"></div>
             <div class="section-title"><i data-lucide="shield-alert"></i><span>Prioritized Vulnerabilities</span></div>
+            <div class="filter-bar">
+                <label class="search-box" for="cve-search"><i data-lucide="search"></i><input id="cve-search" type="search" placeholder="Search CVE, product, vendor, or summary"></label>
+                <div class="segmented" id="priority-filter" aria-label="Priority filter">
+                    <button class="active" data-priority="all">All</button>
+                    <button data-priority="Critical">Critical</button>
+                    <button data-priority="High">High</button>
+                    <button data-priority="Watch">Watch</button>
+                </div>
+                <label class="check-filter"><input id="kev-filter" type="checkbox"> KEV only</label>
+                <span class="stat-sub" id="cve-filter-count">No filters applied</span>
+            </div>
             <div id="cve-table-view"></div>
             <div class="section-title"><i data-lucide="file-text"></i><span>Assessment Notes</span></div>
             <div id="cve-view"></div>
@@ -616,7 +703,15 @@
         pipeline: ['Pipeline', 'How the automation collects, validates, merges, and renders intelligence.'],
     };
 
-    const state = { data: {}, pipeline: null, pipelineHistory: [], samples: [], lastNet: null, lastNetAt: 0 };
+    const state = {
+        data: {},
+        pipeline: null,
+        pipelineHistory: [],
+        cveFilters: { query: '', priority: 'all', kevOnly: false },
+        samples: [],
+        lastNet: null,
+        lastNetAt: 0
+    };
 
     function safeMarkdown(md) {
         return DOMPurify.sanitize(marked.parse(md || ''));
@@ -652,6 +747,24 @@
 
     function entryCollection(entry) {
         return entry && entry.collection && typeof entry.collection === 'object' ? entry.collection : null;
+    }
+
+    function matchesCveFilters(item) {
+        const filters = state.cveFilters;
+        if (filters.priority !== 'all' && item.priority !== filters.priority) return false;
+        if (filters.kevOnly && !item.kev) return false;
+        const query = filters.query.trim().toLowerCase();
+        if (!query) return true;
+        const haystack = [
+            item.cve,
+            item.product,
+            item.vendor,
+            item.severity,
+            item.source,
+            item.summary,
+            item.recommended_action,
+        ].join(' ').toLowerCase();
+        return haystack.includes(query);
     }
 
     function formatPercent(value) {
@@ -763,7 +876,10 @@
     }
 
     function renderCveTable(entry) {
-        const items = entryItems(entry);
+        const allItems = entryItems(entry);
+        const items = allItems.filter(matchesCveFilters);
+        const count = document.getElementById('cve-filter-count');
+        if (count) count.textContent = `${items.length} of ${allItems.length} CVEs shown`;
         if (!items.length) {
             return '<div class="empty">No structured CVE signals are available yet.</div>';
         }
@@ -1110,6 +1226,30 @@
     document.querySelectorAll('.nav button').forEach(button => {
         button.addEventListener('click', () => showPage(button.dataset.page));
     });
+
+    const cveSearch = document.getElementById('cve-search');
+    if (cveSearch) {
+        cveSearch.addEventListener('input', () => {
+            state.cveFilters.query = cveSearch.value;
+            renderIntel();
+        });
+    }
+
+    document.querySelectorAll('#priority-filter button').forEach(button => {
+        button.addEventListener('click', () => {
+            state.cveFilters.priority = button.dataset.priority || 'all';
+            document.querySelectorAll('#priority-filter button').forEach(el => el.classList.toggle('active', el === button));
+            renderIntel();
+        });
+    });
+
+    const kevFilter = document.getElementById('kev-filter');
+    if (kevFilter) {
+        kevFilter.addEventListener('change', () => {
+            state.cveFilters.kevOnly = kevFilter.checked;
+            renderIntel();
+        });
+    }
 
     loadIntel();
     loadPipeline();

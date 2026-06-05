@@ -69,6 +69,8 @@ http://localhost:8765
 
 The landing page is a read-only resource monitor for the host running the pipeline. It includes threshold-based health status, the last telemetry update time, telemetry source status, and short in-browser trend charts for CPU, memory, temperature, and network throughput. Threat intelligence views are available in the navigation.
 
+The CVE Radar view supports triage filtering by search text, priority, and CISA KEV status.
+
 ## Configuration
 
 The default layout works from the repository root. These environment variables can override paths and network settings:
