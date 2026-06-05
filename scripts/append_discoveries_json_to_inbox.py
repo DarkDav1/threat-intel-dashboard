@@ -10,6 +10,7 @@ INBOX = Path(os.environ.get('THREAT_INTEL_INBOX', DASHBOARD_DIR / 'discoveries-i
 ALLOWED_KINDS = {
     'threat_intel', 'cve_radar', 'defender_actions'
 }
+OPTIONAL_FIELDS = {'items', 'sources'}
 
 
 def load_array(path: Path):
@@ -49,12 +50,17 @@ def main():
         key = (kind.strip(), date.strip(), title.strip())
         if key in seen:
             continue
-        inbox.append({
+        normalized = {
             'kind': kind.strip(),
             'date': date.strip(),
             'title': title.strip(),
             'content': content.strip(),
-        })
+        }
+        for field in OPTIONAL_FIELDS:
+            value = item.get(field)
+            if isinstance(value, list):
+                normalized[field] = value
+        inbox.append(normalized)
         seen.add(key)
         appended += 1
 

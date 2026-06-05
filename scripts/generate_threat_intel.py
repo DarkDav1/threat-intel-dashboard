@@ -25,6 +25,11 @@ RSS_SOURCES = [
     ('Palo Alto Unit 42', 'https://unit42.paloaltonetworks.com/feed/'),
     ('Cisco Talos', 'https://blog.talosintelligence.com/rss/'),
     ('The DFIR Report', 'https://thedfirreport.com/feed/'),
+    ('Mandiant', 'https://cloud.google.com/blog/topics/threat-intelligence/rss/'),
+    ('CrowdStrike', 'https://www.crowdstrike.com/en-us/blog/feed/'),
+    ('Elastic Security', 'https://www.elastic.co/security-labs/rss/feed.xml'),
+    ('Rapid7', 'https://www.rapid7.com/blog/rss/'),
+    ('Huntress', 'https://www.huntress.com/blog/rss.xml'),
 ]
 
 SECURITY_RESEARCH_KEYWORDS = [
@@ -110,11 +115,13 @@ def get_recent_kev():
             'vendor': item.get('vendorProject', ''),
             'product': item.get('product', ''),
             'name': item.get('vulnerabilityName', ''),
+            'summary': item.get('shortDescription', ''),
             'date_added': str(date_added),
             'due_date': item.get('dueDate', ''),
             'action': item.get('requiredAction', ''),
             'known_ransomware': item.get('knownRansomwareCampaignUse', ''),
             'source': 'CISA KEV',
+            'url': 'https://www.cisa.gov/known-exploited-vulnerabilities-catalog',
         })
     epss = get_epss([v['cve'] for v in vulns])
     for v in vulns:
@@ -159,6 +166,7 @@ def get_recent_nvd():
             'cvss': score,
             'summary': strip_text(desc)[:320],
             'source': 'NVD',
+            'url': f'https://nvd.nist.gov/vuln/detail/{cve_id}',
         })
     epss = get_epss([v['cve'] for v in items])
     for v in items:
@@ -223,36 +231,90 @@ def md_table(headers, rows):
     return '\n'.join(out)
 
 
+def priority_for(item):
+    if item.get('kev'):
+        return 'Critical'
+    epss = float(item.get('epss') or 0)
+    cvss = float(item.get('cvss') or 0)
+    if epss >= 0.20 or cvss >= 9.8:
+        return 'High'
+    return 'Watch'
+
+
+def normalize_cve_item(item, source):
+    is_kev = source == 'CISA KEV'
+    vendor = item.get('vendor', '')
+    product = item.get('product', '')
+    epss = item.get('epss')
+    percentile = item.get('percentile')
+    normalized = {
+        'cve': item.get('cve', ''),
+        'product': f'{vendor} {product}'.strip() if is_kev else item.get('severity', 'UNKNOWN'),
+        'vendor': vendor,
+        'severity': item.get('severity') or ('KNOWN EXPLOITED' if is_kev else 'UNKNOWN'),
+        'cvss': item.get('cvss'),
+        'epss': round(float(epss), 4) if epss is not None else None,
+        'epss_percentile': round(float(percentile), 4) if percentile is not None else None,
+        'kev': is_kev,
+        'known_ransomware': item.get('known_ransomware', ''),
+        'date': item.get('date_added') or item.get('published') or '',
+        'due_date': item.get('due_date', ''),
+        'source': source,
+        'url': item.get('url', ''),
+        'summary': strip_text(item.get('summary') or item.get('name') or '')[:360],
+        'recommended_action': item.get('action') or 'Review exposure, patch priority, compensating controls, and detection coverage.',
+    }
+    normalized['priority'] = priority_for(normalized)
+    return normalized
+
+
+def build_cve_items(kev, nvd):
+    items = []
+    seen = set()
+    for row in kev:
+        normalized = normalize_cve_item(row, 'CISA KEV')
+        if normalized['cve'] and normalized['cve'] not in seen:
+            items.append(normalized)
+            seen.add(normalized['cve'])
+    for row in nvd:
+        normalized = normalize_cve_item(row, 'NVD')
+        if normalized['cve'] and normalized['cve'] not in seen:
+            items.append(normalized)
+            seen.add(normalized['cve'])
+
+    priority_rank = {'Critical': 0, 'High': 1, 'Watch': 2}
+    items.sort(key=lambda item: (
+        priority_rank.get(item.get('priority'), 9),
+        -(float(item.get('epss') or 0)),
+        -(float(item.get('cvss') or 0)),
+        item.get('date') or '',
+    ))
+    return items[:14]
+
+
 def build_entries():
     date = str(today())
     kev = get_recent_kev()
     nvd = get_recent_nvd()
     research = get_research_watch()
 
+    cve_items = build_cve_items(kev, nvd)
     cve_rows = []
-    for item in kev[:8]:
+    for item in cve_items:
         cve_rows.append([
             item.get('cve'),
-            f"{item.get('vendor')} {item.get('product')}".strip(),
-            'KEV',
-            f"{item.get('epss', 0):.3f}" if 'epss' in item else '-',
-            item.get('date_added'),
+            item.get('product') or item.get('severity', 'UNKNOWN'),
+            item.get('priority'),
+            'KEV' if item.get('kev') else item.get('severity', 'UNKNOWN'),
+            f"{item.get('epss'):.3f}" if item.get('epss') is not None else '-',
+            item.get('date'),
         ])
-    for item in nvd[:6]:
-        if item.get('cve') not in {r[0] for r in cve_rows}:
-            cve_rows.append([
-                item.get('cve'),
-                item.get('severity', 'UNKNOWN'),
-                item.get('cvss', '-'),
-                f"{item.get('epss', 0):.3f}" if 'epss' in item else '-',
-                item.get('published'),
-            ])
     cve_content = [
         '## Daily Assessment',
         'Prioritize vulnerabilities that are listed in CISA KEV, have elevated EPSS probability, or were recently published by NVD with high severity. KEV indicates known exploitation and should be treated as a patching or mitigation priority.',
         '',
         '## CVE Radar',
-        md_table(['CVE', 'Product / Severity', 'Signal', 'EPSS', 'Date'], cve_rows[:12]) if cve_rows else 'No high-priority CVE signals were collected today.',
+        md_table(['CVE', 'Product / Severity', 'Priority', 'Signal', 'EPSS', 'Date'], cve_rows[:12]) if cve_rows else 'No high-priority CVE signals were collected today.',
         '',
         '## Defender Guidance',
         '- Check internet-facing assets, VPNs, firewalls, identity systems, and common open-source components against the CVE table.',
@@ -283,6 +345,11 @@ def build_entries():
         '- Palo Alto Unit 42',
         '- Cisco Talos',
         '- The DFIR Report',
+        '- Mandiant',
+        '- CrowdStrike',
+        '- Elastic Security',
+        '- Rapid7',
+        '- Huntress',
     ])
 
     action_lines = ['## Daily Defender Checklist']
@@ -307,12 +374,16 @@ def build_entries():
             'date': date,
             'title': f'CVE Radar - {date}',
             'content': '\n'.join(cve_content),
+            'items': cve_items,
+            'sources': ['CISA KEV', 'NVD CVE API 2.0', 'FIRST EPSS API'],
         },
         {
             'kind': 'threat_intel',
             'date': date,
             'title': f'Professional Security Research Watch - {date}',
             'content': '\n'.join(research_lines),
+            'items': research[:8],
+            'sources': [source for source, _ in RSS_SOURCES],
         },
         {
             'kind': 'defender_actions',

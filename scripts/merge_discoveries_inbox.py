@@ -12,6 +12,16 @@ BACKUP = Path(os.environ.get('THREAT_INTEL_BACKUP', DASHBOARD_DIR / 'discoveries
 ALLOWED_KINDS = {
     'threat_intel', 'cve_radar', 'defender_actions'
 }
+OPTIONAL_FIELDS = {'items', 'sources'}
+
+
+def keep_optional_fields(item):
+    kept = {}
+    for field in OPTIONAL_FIELDS:
+        value = item.get(field)
+        if isinstance(value, list):
+            kept[field] = value
+    return kept
 
 
 def load_json(path, default):
@@ -48,12 +58,14 @@ def main():
         if not all(isinstance(x, str) and x.strip() for x in [kind, date, title, content]):
             rejected.append({'item': item, 'reason': 'missing-fields'})
             continue
-        valid.append({
+        normalized = {
             'kind': kind,
             'date': date.strip(),
             'title': title.strip(),
             'content': content.strip(),
-        })
+        }
+        normalized.update(keep_optional_fields(item))
+        valid.append(normalized)
 
     for kind in ALLOWED_KINDS:
         if kind in discoveries and not isinstance(discoveries[kind], dict):
@@ -69,15 +81,25 @@ def main():
         key = (item['date'], item['title'])
         existing = next((e for e in entries if isinstance(e, dict) and (e.get('date'), e.get('title')) == key), None)
         if existing:
-            if existing.get('content') != item['content']:
-                existing['content'] = item['content']
+            changed = existing.get('content') != item['content']
+            existing['content'] = item['content']
+            for field in OPTIONAL_FIELDS:
+                if field in item:
+                    changed = changed or existing.get(field) != item[field]
+                    existing[field] = item[field]
+                elif field in existing:
+                    changed = True
+                    existing.pop(field, None)
+            if changed:
                 updated_count += 1
             continue
-        entries.insert(0, {
+        new_entry = {
             'date': item['date'],
             'title': item['title'],
             'content': item['content'],
-        })
+        }
+        new_entry.update(keep_optional_fields(item))
+        entries.insert(0, new_entry)
         merged_count += 1
 
     if DISCOVERIES.exists():

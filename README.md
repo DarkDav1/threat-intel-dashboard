@@ -5,10 +5,10 @@ An automated threat intelligence dashboard for a small homelab or security opera
 The project collects daily signals from trusted vulnerability and security research sources, normalizes them into a constrained JSON format, and renders a focused web dashboard with:
 
 - Resource Monitor
-- CVE Radar
+- Structured CVE Radar
 - Research Watch
 - Defender Actions
-- Pipeline status
+- Pipeline Health
 
 ## Data Sources
 
@@ -35,7 +35,7 @@ This keeps the UI focused on operationally useful threat intelligence instead of
 ```text
 dashboard/
   public/index.html          Web dashboard
-  server.js                  Small Node.js static/API server with read-only resource telemetry
+  server.js                  Small Node.js static/API server with read-only telemetry and pipeline health
 
 scripts/
   generate_threat_intel.py   Fetches and formats daily intelligence
@@ -79,13 +79,15 @@ THREAT_INTEL_DASHBOARD_DIR=/path/to/repo/dashboard
 THREAT_INTEL_OUTPUT=/path/to/discoveries-generated.json
 THREAT_INTEL_DISCOVERIES=/path/to/discoveries.json
 THREAT_INTEL_INBOX=/path/to/discoveries-inbox.json
+THREAT_INTEL_PIPELINE_HEALTH=/path/to/pipeline-health.json
 THREAT_INTEL_SYSTEM_URL=http://remote-host:8765/api/system
 THREAT_INTEL_DISCOVERIES_URL=http://remote-host:8765/api/discoveries
+THREAT_INTEL_PIPELINE_URL=http://remote-host:8765/api/pipeline
 ```
 
 When running the dashboard locally but displaying a remote homelab node, set
-`THREAT_INTEL_SYSTEM_URL` and `THREAT_INTEL_DISCOVERIES_URL` to the remote
-dashboard API endpoints.
+`THREAT_INTEL_SYSTEM_URL`, `THREAT_INTEL_DISCOVERIES_URL`, and
+`THREAT_INTEL_PIPELINE_URL` to the remote dashboard API endpoints.
 
 ## Automation
 
@@ -99,5 +101,6 @@ bash scripts/discoveries_pipeline.sh
 
 - The dashboard API is read-only.
 - The merge step accepts only the three allowed intelligence kinds.
+- Structured CVE and research metadata is allowed only through fixed `items` and `sources` fields.
 - RSS research entries are filtered by security keywords to avoid conference, interview, or general technology content.
 - Existing entries with the same date and title are updated instead of duplicated.

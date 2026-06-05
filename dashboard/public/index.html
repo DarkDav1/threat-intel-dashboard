@@ -277,7 +277,8 @@
         .markdown strong { color: var(--text); }
 
         .markdown table,
-        .process-table {
+        .process-table,
+        .cve-table {
             width: 100%;
             border-collapse: collapse;
             margin: 14px 0;
@@ -287,7 +288,9 @@
         .markdown th,
         .markdown td,
         .process-table th,
-        .process-table td {
+        .process-table td,
+        .cve-table th,
+        .cve-table td {
             padding: 10px 8px;
             text-align: left;
             border-bottom: 1px solid rgba(148, 163, 184, 0.16);
@@ -295,10 +298,59 @@
         }
 
         .markdown th,
-        .process-table th {
+        .process-table th,
+        .cve-table th {
             color: var(--text);
             text-transform: uppercase;
             font-size: 11px;
+        }
+
+        .table-wrap {
+            overflow-x: auto;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            background: var(--panel);
+        }
+
+        .table-wrap .cve-table { margin: 0; min-width: 920px; }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            border-radius: 999px;
+            padding: 3px 8px;
+            font-size: 11px;
+            font-weight: 800;
+            text-transform: uppercase;
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            color: var(--muted);
+            background: rgba(148, 163, 184, 0.08);
+            white-space: nowrap;
+        }
+
+        .badge.critical {
+            color: var(--red);
+            border-color: rgba(251, 113, 133, 0.32);
+            background: rgba(251, 113, 133, 0.1);
+        }
+
+        .badge.high {
+            color: var(--yellow);
+            border-color: rgba(250, 204, 21, 0.32);
+            background: rgba(250, 204, 21, 0.1);
+        }
+
+        .badge.ok {
+            color: var(--green);
+            border-color: rgba(52, 211, 153, 0.32);
+            background: rgba(52, 211, 153, 0.1);
+        }
+
+        .muted { color: var(--muted); }
+        .mono { font-family: "JetBrains Mono", monospace; }
+
+        .run-card {
+            margin-top: 14px;
         }
 
         .markdown pre {
@@ -439,12 +491,20 @@
             <div id="priority-view"></div>
         </section>
 
-        <section id="page-cve" class="page"><div id="cve-view"></div></section>
+        <section id="page-cve" class="page">
+            <div id="cve-summary-grid" class="grid"></div>
+            <div class="section-title"><i data-lucide="shield-alert"></i><span>Prioritized Vulnerabilities</span></div>
+            <div id="cve-table-view"></div>
+            <div class="section-title"><i data-lucide="file-text"></i><span>Assessment Notes</span></div>
+            <div id="cve-view"></div>
+        </section>
         <section id="page-research" class="page"><div id="research-view"></div></section>
         <section id="page-actions" class="page"><div id="actions-view"></div></section>
 
         <section id="page-pipeline" class="page">
             <div class="grid" id="pipeline-stats"></div>
+            <div class="section-title"><i data-lucide="circle-check-big"></i><span>Last Run</span></div>
+            <div id="pipeline-run"></div>
             <div class="section-title"><i data-lucide="workflow"></i><span>Automation Flow</span></div>
             <div class="pipeline">
                 <div class="step"><span class="step-number">1</span><h3>Collect</h3><p>Fetch CISA KEV, NVD, FIRST EPSS, and selected professional security research feeds.</p></div>
@@ -468,14 +528,14 @@
         pipeline: ['Pipeline', 'How the automation collects, validates, merges, and renders intelligence.'],
     };
 
-    const state = { data: {}, lastNet: null, lastNetAt: 0 };
+    const state = { data: {}, pipeline: null, lastNet: null, lastNetAt: 0 };
 
     function safeMarkdown(md) {
         return DOMPurify.sanitize(marked.parse(md || ''));
     }
 
     function escapeHtml(value) {
-        return String(value || '').replace(/[&<>"']/g, ch => ({
+        return String(value ?? '').replace(/[&<>"']/g, ch => ({
             '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
         }[ch]));
     }
@@ -496,6 +556,22 @@
     function countLinks(content) {
         const matches = String(content || '').match(/\]\(https?:\/\/[^)]+\)/g);
         return matches ? matches.length : 0;
+    }
+
+    function entryItems(entry) {
+        return Array.isArray(entry && entry.items) ? entry.items : [];
+    }
+
+    function formatPercent(value) {
+        if (value === null || value === undefined || value === '') return '--';
+        return `${(Number(value) * 100).toFixed(1)}%`;
+    }
+
+    function formatDateTime(value) {
+        if (!value) return 'Not recorded';
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return value;
+        return date.toLocaleString([], { hour12: false });
     }
 
     function formatBytes(bytes) {
@@ -525,6 +601,12 @@
         return `<div class="card"><span class="stat-label">${escapeHtml(label)}</span><span class="stat-value">${escapeHtml(value)}</span></div>`;
     }
 
+    function badge(value) {
+        const label = String(value || 'Watch');
+        const cls = label.toLowerCase() === 'critical' ? 'critical' : label.toLowerCase() === 'high' ? 'high' : label.toLowerCase() === 'ok' ? 'ok' : '';
+        return `<span class="badge ${cls}">${escapeHtml(label)}</span>`;
+    }
+
     function article(entry, label) {
         if (!entry) return '<div class="empty">No validated content is available for this section yet.</div>';
         return `
@@ -536,14 +618,81 @@
         `;
     }
 
+    function renderCveTable(entry) {
+        const items = entryItems(entry);
+        if (!items.length) {
+            return '<div class="empty">No structured CVE signals are available yet.</div>';
+        }
+        const rows = items.map(item => {
+            const cve = escapeHtml(item.cve || 'Unknown');
+            const cveCell = item.url ? `<a href="${escapeHtml(item.url)}" target="_blank" rel="noreferrer">${cve}</a>` : cve;
+            const signal = item.kev ? 'CISA KEV' : (item.severity || item.source || 'NVD');
+            return `
+                <tr>
+                    <td class="mono">${cveCell}</td>
+                    <td>
+                        <strong>${escapeHtml(item.product || item.vendor || 'Unknown product')}</strong>
+                        <div class="muted">${escapeHtml(item.summary || '').slice(0, 150)}</div>
+                    </td>
+                    <td>${badge(item.priority)}</td>
+                    <td>${escapeHtml(signal)}</td>
+                    <td>${item.cvss === null || item.cvss === undefined ? '--' : escapeHtml(item.cvss)}</td>
+                    <td>${formatPercent(item.epss)}</td>
+                    <td>${escapeHtml(item.date || '--')}</td>
+                    <td>${escapeHtml(item.recommended_action || '').slice(0, 180)}</td>
+                </tr>
+            `;
+        }).join('');
+        return `
+            <div class="table-wrap">
+                <table class="cve-table">
+                    <thead>
+                        <tr><th>CVE</th><th>Product / Context</th><th>Priority</th><th>Signal</th><th>CVSS</th><th>EPSS</th><th>Date</th><th>Action</th></tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+        `;
+    }
+
+    function renderPipeline(latestDate) {
+        const pipeline = state.pipeline || {};
+        const merge = pipeline.merge || {};
+        const append = pipeline.append || {};
+        const status = pipeline.status || 'unknown';
+        document.getElementById('pipeline-stats').innerHTML = [
+            statCard('Status', status.toUpperCase()),
+            statCard('Last finished', formatDateTime(pipeline.finished_at)),
+            statCard('Generated items', pipeline.generated_items ?? '--'),
+            statCard('Last data date', latestDate),
+        ].join('');
+
+        const rejected = Array.isArray(merge.rejected) ? merge.rejected.length : 0;
+        document.getElementById('pipeline-run').innerHTML = `
+            <div class="card run-card">
+                <div class="article-meta"><span>${badge(status === 'ok' ? 'OK' : status)}</span><span class="mono">${escapeHtml(pipeline.stage || 'unknown')}</span></div>
+                <div class="grid">
+                    ${statCard('Appended', append.appended ?? '--')}
+                    ${statCard('Merged', merge.merged ?? '--')}
+                    ${statCard('Updated', merge.updated ?? '--')}
+                    ${statCard('Rejected', rejected)}
+                </div>
+                <div class="stat-sub">${escapeHtml(pipeline.message || 'No pipeline message recorded.')}</div>
+            </div>
+        `;
+    }
+
     function renderIntel() {
         const cve = latest(entriesFor('cve_radar'));
         const research = latest(entriesFor('threat_intel'));
         const actions = latest(entriesFor('defender_actions'));
         const all = [cve, research, actions].filter(Boolean);
         const latestDate = all.map(e => e.date).sort().reverse()[0] || 'No data';
-        const cveCount = countCves(cve && cve.content);
-        const sourceCount = countLinks(research && research.content);
+        const cveItems = entryItems(cve);
+        const criticalCount = cveItems.filter(item => item.priority === 'Critical').length;
+        const highCount = cveItems.filter(item => item.priority === 'High').length;
+        const cveCount = cveItems.length || countCves(cve && cve.content);
+        const sourceCount = (Array.isArray(research && research.sources) ? research.sources.length : 0) || countLinks(research && research.content);
 
         setText('overview-grid', '');
         document.getElementById('overview-grid').innerHTML = [
@@ -554,15 +703,17 @@
         ].join('');
 
         document.getElementById('priority-view').innerHTML = article(cve, 'CVE Radar');
+        document.getElementById('cve-summary-grid').innerHTML = [
+            statCard('Tracked CVEs', cveCount),
+            statCard('Critical', criticalCount),
+            statCard('High', highCount),
+            statCard('KEV matches', cveItems.filter(item => item.kev).length),
+        ].join('');
+        document.getElementById('cve-table-view').innerHTML = renderCveTable(cve);
         document.getElementById('cve-view').innerHTML = article(cve, 'CVE Radar');
         document.getElementById('research-view').innerHTML = article(research, 'Research Watch');
         document.getElementById('actions-view').innerHTML = article(actions, 'Defender Actions');
-        document.getElementById('pipeline-stats').innerHTML = [
-            statCard('Collector', 'Python script'),
-            statCard('Schedule', 'Cron or OpenClaw'),
-            statCard('Allowed kinds', '3'),
-            statCard('Last data date', latestDate),
-        ].join('');
+        renderPipeline(latestDate);
         try { lucide.createIcons(); } catch (e) {}
     }
 
@@ -573,6 +724,17 @@
             renderIntel();
         } catch (error) {
             document.getElementById('priority-view').innerHTML = `<div class="empty">Failed to load intelligence data: ${escapeHtml(error.message)}</div>`;
+        }
+    }
+
+    async function loadPipeline() {
+        try {
+            const response = await fetch('/api/pipeline');
+            state.pipeline = await response.json();
+            renderIntel();
+        } catch (error) {
+            state.pipeline = { status: 'failed', message: error.message };
+            renderIntel();
         }
     }
 
@@ -649,8 +811,11 @@
     });
 
     loadIntel();
+    loadPipeline();
     loadSystem();
     setInterval(loadSystem, 2500);
+    setInterval(loadIntel, 300000);
+    setInterval(loadPipeline, 60000);
     try { lucide.createIcons(); } catch (e) {}
 </script>
 </body>

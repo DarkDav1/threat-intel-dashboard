@@ -12,8 +12,10 @@ const HOST = process.env.COCKY_DASHBOARD_HOST || '0.0.0.0';
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const DASHBOARD_ROOT = process.env.THREAT_INTEL_DASHBOARD_DIR || __dirname;
 const DISCOVERIES_FILE = path.join(DASHBOARD_ROOT, 'discoveries.json');
+const PIPELINE_HEALTH_FILE = path.join(DASHBOARD_ROOT, 'pipeline-health.json');
 const REMOTE_SYSTEM_URL = process.env.THREAT_INTEL_SYSTEM_URL || '';
 const REMOTE_DISCOVERIES_URL = process.env.THREAT_INTEL_DISCOVERIES_URL || '';
+const REMOTE_PIPELINE_URL = process.env.THREAT_INTEL_PIPELINE_URL || '';
 
 const MIME_TYPES = {
     '.html': 'text/html; charset=utf-8',
@@ -79,6 +81,28 @@ async function readDiscoveries() {
             cve_radar: { entries: [] },
             threat_intel: { entries: [] },
             defender_actions: { entries: [] },
+        };
+    }
+}
+
+async function readPipelineHealth() {
+    try {
+        if (REMOTE_PIPELINE_URL) {
+            return await fetchJson(REMOTE_PIPELINE_URL);
+        }
+        const raw = await fs.readFile(PIPELINE_HEALTH_FILE, 'utf-8');
+        return JSON.parse(raw);
+    } catch (error) {
+        return {
+            status: 'unknown',
+            stage: 'unknown',
+            exit_code: null,
+            message: 'No pipeline run has been recorded yet.',
+            started_at: null,
+            finished_at: null,
+            generated_items: null,
+            append: null,
+            merge: null,
         };
     }
 }
@@ -215,6 +239,7 @@ async function getSystemInfo() {
 
 async function getHealth() {
     const discoveries = await readDiscoveries();
+    const pipeline = await readPipelineHealth();
     return {
         ok: true,
         hostname: os.hostname(),
@@ -222,6 +247,11 @@ async function getHealth() {
         sections: Object.fromEntries(
             Object.entries(discoveries).map(([kind, value]) => [kind, Array.isArray(value.entries) ? value.entries.length : 0])
         ),
+        pipeline: {
+            status: pipeline.status,
+            stage: pipeline.stage,
+            finished_at: pipeline.finished_at,
+        },
     };
 }
 
@@ -253,6 +283,11 @@ const server = http.createServer(async (req, res) => {
 
         if (normalizedUrl === '/api/system') {
             sendJson(res, 200, await getSystemInfo());
+            return;
+        }
+
+        if (normalizedUrl === '/api/pipeline') {
+            sendJson(res, 200, await readPipelineHealth());
             return;
         }
 
